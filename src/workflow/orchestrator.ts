@@ -1,7 +1,7 @@
 // 这个文件是整个项目的编排核心。
 // 它负责把需求澄清、UI 生成、开发、测试、修复、验收和发布串成一条完整工作流。
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Agent, AgentDefinition, AgentExecutionContext, AgentResult } from "../agents/base.js";
@@ -22,6 +22,8 @@ import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../t
 import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
 import { GeneratedWorkspaceTestRunner, type TestRunner } from "../tools/test-runner.js";
 import type {
+  AlignmentFinding,
+  AlignmentReportArtifact,
   AgentRunRecord,
   BugReport,
   FailureMemory,
@@ -32,6 +34,7 @@ import type {
   TestRun,
   UiArtifact,
   WorkflowJob,
+  WorkflowLogEntry,
 } from "../types/domain.js";
 import { assertPathsWithinScopes } from "./workspace-policy.js";
 
@@ -98,6 +101,7 @@ export class DeliveryOrchestrator {
     // 新任务创建时，先让 spec-agent 把自然语言需求整理成结构化 requirement。
     const jobId = randomUUID();
     const codeWorkspace = createCodeWorkspace(jobId);
+    const logFilePath = getWorkflowLogFilePath(jobId);
     await this.deps.repoWriter.ensureWorkspace(codeWorkspace);
     this.notifyProgress("正在分析原始需求，并生成澄清后的 spec。");
 
@@ -115,9 +119,11 @@ export class DeliveryOrchestrator {
       id: jobId,
       requirement: specExecution.result.data.requirement,
       codeWorkspace,
+      logFilePath,
       specArtifact,
       stage: "drafting_spec",
       uiArtifacts: [],
+      alignmentReports: [],
       bugReports: [],
       testRuns: [],
       agentRuns: [
@@ -138,6 +144,15 @@ export class DeliveryOrchestrator {
     };
 
     await this.deps.store.create(job);
+    await this.persistWorkflowLog(jobId, {
+      createdAt: now,
+      level: "info",
+      stage: "drafting_spec",
+      message: "Job created and initial spec clarification completed.",
+      details: {
+        specPath: specArtifact.markdownPath,
+      },
+    });
     return this.deps.store.get(job.id);
   }
 
@@ -188,6 +203,14 @@ export class DeliveryOrchestrator {
       this.deps.monitorAgent,
       { job },
     );
+    await this.persistAlignmentReport(jobId, {
+      scope: monitorResult.data.scope,
+      aligned: monitorResult.data.aligned,
+      summary: monitorResult.data.summary,
+      findings: monitorResult.data.structuredFindings,
+      checkedFiles: monitorResult.data.checkedFiles,
+      attemptedAutoFix: false,
+    });
     if (monitorResult.status === "blocked" || !monitorResult.data.aligned) {
       return this.blockJob(jobId, monitorResult.summary);
     }
@@ -530,12 +553,63 @@ export class DeliveryOrchestrator {
         feature: monitoredFeature,
       },
     );
+    const initialFeatureReport = await this.persistAlignmentReport(jobId, {
+      scope: featureMonitorResult.data.scope,
+      featureId,
+      aligned: featureMonitorResult.data.aligned,
+      summary: featureMonitorResult.data.summary,
+      findings: featureMonitorResult.data.structuredFindings,
+      checkedFiles: featureMonitorResult.data.checkedFiles,
+      attemptedAutoFix: false,
+    });
     if (featureMonitorResult.status === "blocked" || !featureMonitorResult.data.aligned) {
-      await this.updateFeature(jobId, featureId, (current) => ({
-        ...current,
-        status: "blocked",
-      }));
-      return this.blockJob(jobId, featureMonitorResult.summary);
+      const autoFixSummary = await this.repairAlignmentDrift(
+        jobId,
+        monitoredFeature,
+        featureMonitorResult.data.structuredFindings,
+      );
+      const refreshedJob = await this.deps.store.get(jobId);
+      const refreshedFeature = this.requireFeature(refreshedJob, featureId);
+      const retryMonitorResult = await this.executeAgent(
+        jobId,
+        "verifying_alignment",
+        this.deps.monitorAgent,
+        {
+          job: refreshedJob,
+          feature: refreshedFeature,
+        },
+      );
+      await this.persistAlignmentReport(jobId, {
+        scope: retryMonitorResult.data.scope,
+        featureId,
+        aligned: retryMonitorResult.data.aligned,
+        summary: retryMonitorResult.data.summary,
+        findings: retryMonitorResult.data.structuredFindings,
+        checkedFiles: retryMonitorResult.data.checkedFiles,
+        attemptedAutoFix: true,
+        autoFixSummary,
+      });
+      if (retryMonitorResult.status === "blocked" || !retryMonitorResult.data.aligned) {
+        await this.updateFeature(jobId, featureId, (current) => ({
+          ...current,
+          status: "blocked",
+        }));
+        return this.blockJob(
+          jobId,
+          `${retryMonitorResult.summary} Alignment reports: ${initialFeatureReport.filePath}`,
+        );
+      }
+
+      await this.persistWorkflowLog(jobId, {
+        createdAt: new Date().toISOString(),
+        level: "info",
+        stage: "verifying_alignment",
+        message: `Feature alignment drift for "${featureId}" was auto-repaired successfully.`,
+        details: {
+          reportPath: initialFeatureReport.filePath,
+          autoFixSummary,
+        },
+      });
     }
 
     return this.deps.store.get(jobId);
@@ -676,6 +750,17 @@ export class DeliveryOrchestrator {
         },
       ],
     }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: execution.record.createdAt,
+      level: execution.result.status === "blocked" ? "warn" : "info",
+      stage,
+      message: `${agent.definition.name}: ${execution.result.summary}`,
+      details: {
+        nextAction: execution.result.nextAction,
+        changedFiles: execution.result.changedFiles,
+        risks: execution.result.risks,
+      },
+    });
 
     return execution.result;
   }
@@ -694,6 +779,12 @@ export class DeliveryOrchestrator {
         },
       ],
     }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: new Date().toISOString(),
+      level: stage === "blocked" ? "error" : "info",
+      stage,
+      message,
+    });
   }
 
   private async recordTest(jobId: string, testRun: TestRun): Promise<void> {
@@ -724,6 +815,17 @@ export class DeliveryOrchestrator {
         },
       ],
     }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: testRun.createdAt,
+      level: testRun.passed ? "info" : "warn",
+      stage: "testing_feature",
+      message: `Test run (${testRun.scope}): ${testRun.summary}`,
+      details: {
+        targetId: testRun.targetId,
+        passed: testRun.passed,
+        bugCount: testRun.bugs.length,
+      },
+    });
   }
 
   private async recordReleaseApproval(
@@ -744,6 +846,18 @@ export class DeliveryOrchestrator {
         },
       ],
     }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: releaseApproval.decidedAt,
+      level: releaseApproval.approved ? "info" : "warn",
+      stage: "previewing_release",
+      message: releaseApproval.approved
+        ? "Customer approved the final preview for release."
+        : "Customer rejected the final preview.",
+      details: {
+        feedback: releaseApproval.feedback,
+        previewPath: releaseApproval.previewPath,
+      },
+    });
   }
 
   // 首轮失败后立即写一条失败记忆，记录失败发生在哪个步骤、返回了什么结果。
@@ -799,6 +913,16 @@ export class DeliveryOrchestrator {
       ],
     }));
     await this.persistFeatureFailureHistory(jobId, featureId);
+    await this.persistWorkflowLog(jobId, {
+      createdAt: input.testRun.createdAt,
+      level: "warn",
+      stage: input.stage,
+      message: `Recorded failure memory for ${featureId} at step "${input.step}".`,
+      details: {
+        summary: input.testRun.summary,
+        bugTitles: input.testRun.bugs.map((bug) => bug.title),
+      },
+    });
   }
 
   // 修复计划生成后，把它挂到最新的失败记忆上，便于后续知道“上次试过怎么修”。
@@ -901,6 +1025,116 @@ export class DeliveryOrchestrator {
     );
   }
 
+  // monitor-agent 的每次执行结果都会单独落成报告，方便事后查看“哪一层什么时候偏了”。
+  private async persistAlignmentReport(
+    jobId: string,
+    input: {
+      scope: "feature" | "job";
+      featureId?: string;
+      aligned: boolean;
+      summary: string;
+      findings: AlignmentFinding[];
+      checkedFiles: string[];
+      attemptedAutoFix: boolean;
+      autoFixSummary?: string;
+    },
+  ): Promise<AlignmentReportArtifact> {
+    const createdAt = new Date().toISOString();
+    const reportDir = path.join(this.deps.baseDir, "artifacts", "alignment-reports", jobId);
+    await mkdir(reportDir, { recursive: true });
+
+    const fileName =
+      input.scope === "feature" && input.featureId
+        ? `${input.featureId}-${createdAt.replaceAll(":", "-")}.json`
+        : `job-${createdAt.replaceAll(":", "-")}.json`;
+    const filePath = path.posix.join("artifacts", "alignment-reports", jobId, fileName);
+
+    const report: AlignmentReportArtifact = {
+      filePath,
+      createdAt,
+      scope: input.scope,
+      featureId: input.featureId,
+      aligned: input.aligned,
+      summary: input.summary,
+      findings: input.findings,
+      checkedFiles: input.checkedFiles,
+      attemptedAutoFix: input.attemptedAutoFix,
+      autoFixSummary: input.autoFixSummary,
+    };
+
+    await writeFile(path.join(this.deps.baseDir, filePath), JSON.stringify(report, null, 2), "utf8");
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      alignmentReports: [...current.alignmentReports, report],
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt,
+      level: input.aligned ? "info" : "warn",
+      stage: "verifying_alignment",
+      message: `Alignment report saved: ${filePath}`,
+      details: {
+        scope: input.scope,
+        featureId: input.featureId,
+        aligned: input.aligned,
+        findingCount: input.findings.length,
+        attemptedAutoFix: input.attemptedAutoFix,
+      },
+    });
+
+    return report;
+  }
+
+  // 偏航发现后，先把结果转换成 bug 语义，再交给 fix-agent 做定向修复。
+  private async repairAlignmentDrift(
+    jobId: string,
+    feature: FeatureSpec,
+    findings: AlignmentFinding[],
+  ): Promise<string> {
+    const driftBugReports = findings.map((finding, index) => ({
+      id: randomUUID(),
+      featureId: feature.id,
+      title: `[${finding.layer}] ${finding.rule ?? `drift-${index + 1}`}`,
+      description: finding.message,
+      severity: "high" as const,
+      status: "open" as const,
+    }));
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      bugReports: mergeBugReports(current.bugReports, driftBugReports),
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: new Date().toISOString(),
+      level: "warn",
+      stage: "verifying_alignment",
+      message: `Detected alignment drift for feature "${feature.name}", entering targeted repair.`,
+      details: {
+        featureId: feature.id,
+        findings: driftBugReports.map((bug) => bug.title),
+      },
+    });
+
+    await this.transition(
+      jobId,
+      "fixing_feature",
+      `Monitor detected drift for "${feature.name}". Entering targeted alignment repair.`,
+    );
+    const job = await this.deps.store.get(jobId);
+    const fixResult = await this.executeAgent(jobId, "fixing_feature", this.deps.fixAgent, {
+      feature,
+      bugReports: driftBugReports,
+      codeWorkspace: job.codeWorkspace,
+      alignmentFindings: findings,
+    });
+    await this.updateFeature(jobId, feature.id, (current) => ({
+      ...current,
+      status: "done",
+      generatedFiles: mergeGeneratedFiles(current.generatedFiles, fixResult.changedFiles),
+    }));
+    await this.markSpecificBugsFixed(jobId, driftBugReports.map((bug) => bug.id));
+
+    return fixResult.summary;
+  }
+
   private async updateFeature(
     jobId: string,
     featureId: string,
@@ -926,9 +1160,25 @@ export class DeliveryOrchestrator {
     }));
   }
 
+  private async markSpecificBugsFixed(jobId: string, bugIds: string[]): Promise<void> {
+    const knownIds = new Set(bugIds);
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      bugReports: current.bugReports.map((bug) =>
+        knownIds.has(bug.id) ? { ...bug, status: "fixed" } : bug,
+      ),
+    }));
+  }
+
   private async blockJob(jobId: string, reason: string): Promise<WorkflowJob> {
     await this.transition(jobId, "blocked", reason);
     return this.deps.store.get(jobId);
+  }
+
+  private async persistWorkflowLog(jobId: string, entry: WorkflowLogEntry): Promise<void> {
+    const logFilePath = path.join(this.deps.baseDir, getWorkflowLogFilePath(jobId));
+    await mkdir(path.dirname(logFilePath), { recursive: true });
+    await appendFile(logFilePath, `${JSON.stringify(entry)}\n`, "utf8");
   }
 
   private requireFeature(job: WorkflowJob, featureId: string): FeatureSpec {
@@ -1003,6 +1253,10 @@ function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugRepor
 
 function mergeGeneratedFiles(existing: string[], incoming: string[]): string[] {
   return [...new Set([...existing, ...incoming])];
+}
+
+function getWorkflowLogFilePath(jobId: string): string {
+  return path.posix.join("artifacts", "logs", jobId, "workflow.jsonl");
 }
 
 function toBugSignature(bugTitles: string[]): string {

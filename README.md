@@ -121,10 +121,32 @@ npm run dev -- --yes --no-open
 - `fix-agent` 会读取这些文件，并在测试失败后生成修复版改动
 - `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记，以及 Prisma/PostgreSQL 配置是否到位
 - `monitor-agent` 会在每个功能点修复完成后立即检查一次，看前端、后端、数据库层有没有偏离已批准的需求与架构
+- 一旦 monitor 发现偏航，系统会：
+  - 明确指出是 `frontend`、`backend`、`database`、`ui` 还是 `workflow` 层出了问题
+  - 把偏航结果落到 `artifacts/alignment-reports/<jobId>/`
+  - 直接把偏航 finding 交给 `fix-agent` 做一次定向修复
+  - 把全过程写入 `artifacts/logs/<jobId>/workflow.jsonl`
 
 也就是说，链路已经从“只出实现计划”升级成了：
 
 `UI 确认 -> 生成前端/后端/数据库代码 -> 跑校验 -> 失败则修复代码 -> 复测 -> monitor-agent 检查是否跑偏`
+
+## 日志与偏航报告
+
+为了方便排查“什么时候在哪一步出了问题”，当前每个 job 都会额外生成：
+
+- 工作流日志：`artifacts/logs/<jobId>/workflow.jsonl`
+- 偏航报告：`artifacts/alignment-reports/<jobId>/*.json`
+
+其中：
+
+- 日志会记录阶段切换、agent 执行、测试结果、失败记忆、客户确认等关键事件
+- 偏航报告会记录：
+  - 是 feature 级还是 job 级检查
+  - 是否对齐
+  - 哪个层面出了问题
+  - 检查了哪些文件
+  - 是否尝试过自动定向修复
 
 ## Prisma + PostgreSQL 数据层
 

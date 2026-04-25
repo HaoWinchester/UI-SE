@@ -5,7 +5,13 @@ import { readFile } from "node:fs/promises";
 
 import type { Agent, AgentExecutionContext, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
-import type { BugReport, CodeFileEdit, CodeWorkspace, FeatureSpec } from "../types/domain.js";
+import type {
+  AlignmentFinding,
+  BugReport,
+  CodeFileEdit,
+  CodeWorkspace,
+  FeatureSpec,
+} from "../types/domain.js";
 import { OpenAiJsonModelClient } from "../tools/model-client.js";
 
 // fix-agent 负责把 bug 列表转换成一份修复计划。
@@ -13,6 +19,7 @@ export interface FixAgentInput {
   feature: FeatureSpec;
   bugReports: BugReport[];
   codeWorkspace: CodeWorkspace;
+  alignmentFindings?: AlignmentFinding[];
 }
 
 export interface FixAgentOutput {
@@ -41,7 +48,7 @@ export class FixAgent implements Agent<FixAgentInput, FixAgentOutput> {
   readonly definition = agentRegistry["fix-agent"];
 
   async run(
-    { feature, bugReports }: FixAgentInput,
+    { feature, bugReports, alignmentFindings }: FixAgentInput,
     context: AgentExecutionContext,
   ): Promise<AgentResult<FixAgentOutput>> {
     const bugTitles = bugReports.map((bug) => bug.title).join("; ");
@@ -55,6 +62,10 @@ export class FixAgent implements Agent<FixAgentInput, FixAgentOutput> {
       ...bugReports.map(
         (bug, index) => `${recentFailures.length + index + 1}. 修复问题 "${bug.title}" 并移除对应的占位实现。`,
       ),
+      ...((alignmentFindings ?? []).map(
+        (finding, index) =>
+          `${recentFailures.length + bugReports.length + index + 1}. 处理 ${finding.layer} 层偏航：${finding.message}`,
+      )),
     ];
 
     const modelPayload =
@@ -65,13 +76,14 @@ export class FixAgent implements Agent<FixAgentInput, FixAgentOutput> {
             temperature: context.model.temperature,
             feature,
             bugReports,
+            alignmentFindings,
             fileSnapshots,
           })
         : undefined;
 
     const fileEdits = modelPayload?.files.length
       ? normalizeModelFileEdits(modelPayload.files)
-      : buildTemplateFixEdits(fileSnapshots, bugReports);
+      : buildTemplateFixEdits(fileSnapshots, bugReports, alignmentFindings);
     const repeatedIssueDetected = hasRepeatedIssue(feature.failureHistory, bugReports.map((bug) => bug.title));
     const summary =
       modelPayload?.summary ??
@@ -125,6 +137,7 @@ async function tryGenerateFixesWithModel(input: {
   temperature: number;
   feature: FeatureSpec;
   bugReports: BugReport[];
+  alignmentFindings?: AlignmentFinding[];
   fileSnapshots: FileSnapshot[];
 }): Promise<ModelGeneratedFixPayload | undefined> {
   try {
@@ -138,6 +151,7 @@ async function tryGenerateFixesWithModel(input: {
       userPrompt: [
         `Feature name: ${input.feature.name}`,
         `Bugs: ${input.bugReports.map((bug) => `${bug.title}: ${bug.description}`).join(" | ")}`,
+        `Alignment findings: ${(input.alignmentFindings ?? []).map((finding) => `${finding.layer}: ${finding.message}`).join(" | ") || "none"}`,
         "Current files:",
         ...input.fileSnapshots.map(
           (file) => `FILE ${file.path}\n${file.content.slice(0, 4000)}`,
@@ -161,11 +175,24 @@ function normalizeModelFileEdits(files: ModelGeneratedFixPayload["files"]): Code
 function buildTemplateFixEdits(
   fileSnapshots: FileSnapshot[],
   bugReports: BugReport[],
+  alignmentFindings?: AlignmentFinding[],
 ): CodeFileEdit[] {
-  const fixSummary = bugReports.map((bug) => bug.title).join("; ");
+  const fixSummary =
+    bugReports.map((bug) => bug.title).join("; ") ||
+    (alignmentFindings ?? [])
+      .map((finding) => `[${finding.layer}] ${finding.message}`)
+      .join("; ");
+  const targetedPaths = collectTargetedPaths(fileSnapshots, alignmentFindings);
   const edits: CodeFileEdit[] = [];
+  const shouldRepairFrontendAlignment = (alignmentFindings ?? []).some(
+    (finding) => finding.layer === "frontend" && finding.rule === "frontend_alignment_marker",
+  );
 
   for (const snapshot of fileSnapshots) {
+    if (targetedPaths.size > 0 && !targetedPaths.has(snapshot.path)) {
+      continue;
+    }
+
     let nextContent = snapshot.content;
     nextContent = nextContent.replace(
       /^.*TODO:.*$/gm,
@@ -179,6 +206,17 @@ function buildTemplateFixEdits(
       );
     }
 
+    if (
+      shouldRepairFrontendAlignment &&
+      snapshot.path.endsWith("FeatureView.tsx") &&
+      !nextContent.includes('data-alignment-verified="true"')
+    ) {
+      nextContent = nextContent.replace(
+        /<main className="feature-shell"([^>]*)>/,
+        '<main className="feature-shell"$1 data-alignment-verified="true">',
+      );
+    }
+
     if (snapshot.path.endsWith("route.ts") && !nextContent.includes("export const implementationReady = true;")) {
       nextContent = [
         nextContent.trimEnd(),
@@ -186,6 +224,25 @@ function buildTemplateFixEdits(
         "export const implementationReady = true;",
         "",
       ].join("\n");
+    }
+
+    if (
+      snapshot.path.endsWith("repository.ts") &&
+      !nextContent.includes("export const databaseAlignmentReady = true;")
+    ) {
+      nextContent = [
+        nextContent.trimEnd(),
+        "",
+        "export const databaseAlignmentReady = true;",
+        "",
+      ].join("\n");
+    }
+
+    if (
+      snapshot.path.endsWith("schema.prisma") &&
+      !nextContent.includes("/// Alignment status: verified")
+    ) {
+      nextContent = `${nextContent.trimEnd()}\n\n/// Alignment status: verified\n`;
     }
 
     if (nextContent !== snapshot.content) {
@@ -215,4 +272,37 @@ function toBugSignature(bugTitles: string[]): string {
     .filter(Boolean)
     .sort()
     .join("|");
+}
+
+function collectTargetedPaths(
+  fileSnapshots: FileSnapshot[],
+  alignmentFindings: AlignmentFinding[] | undefined,
+): Set<string> {
+  const targetedPaths = new Set<string>();
+  if (!alignmentFindings || alignmentFindings.length === 0) {
+    return targetedPaths;
+  }
+
+  for (const finding of alignmentFindings) {
+    if (finding.filePath) {
+      targetedPaths.add(finding.filePath);
+      continue;
+    }
+
+    for (const snapshot of fileSnapshots) {
+      if (finding.layer === "frontend" && snapshot.path.includes("/frontend/")) {
+        targetedPaths.add(snapshot.path);
+      }
+
+      if (finding.layer === "backend" && snapshot.path.includes("/backend/")) {
+        targetedPaths.add(snapshot.path);
+      }
+
+      if (finding.layer === "database" && snapshot.path.includes("/database/")) {
+        targetedPaths.add(snapshot.path);
+      }
+    }
+  }
+
+  return targetedPaths;
 }

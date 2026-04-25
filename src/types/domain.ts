@@ -31,6 +31,8 @@ export type BugStatus = "open" | "fixed";
 export type ReviewStatus = "pending" | "approved" | "rejected";
 export type DeliveryTrackStatus = "pending" | "in_progress" | "done";
 export type FailureMemoryStatus = "open" | "addressed" | "resolved" | "repeated";
+export type WorkflowLogLevel = "info" | "warn" | "error";
+export type AlignmentLayer = "ui" | "frontend" | "backend" | "database" | "workflow";
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
@@ -122,6 +124,15 @@ export interface ReleaseApprovalRecord {
   decidedAt: string;
 }
 
+// 工作流日志落盘后使用的结构，方便回放“什么时候在哪一步出了什么问题”。
+export interface WorkflowLogEntry {
+  createdAt: string;
+  level: WorkflowLogLevel;
+  stage: JobStage;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
 // 测试失败后生成的 bug 记录。
 export interface BugReport {
   id: string;
@@ -149,6 +160,29 @@ export interface FailureMemory {
   recordedAt: string;
   resolvedAt?: string;
   resolutionNote?: string;
+}
+
+// 偏航检查会返回结构化 finding，明确是哪个层面出了问题。
+export interface AlignmentFinding {
+  layer: AlignmentLayer;
+  message: string;
+  severity: "warning" | "blocking";
+  filePath?: string;
+  rule?: string;
+}
+
+// 每次 monitor-agent 执行后都会落一份报告，方便事后排查和回放。
+export interface AlignmentReportArtifact {
+  filePath: string;
+  createdAt: string;
+  scope: "feature" | "job";
+  featureId?: string;
+  aligned: boolean;
+  summary: string;
+  findings: AlignmentFinding[];
+  checkedFiles: string[];
+  attemptedAutoFix: boolean;
+  autoFixSummary?: string;
 }
 
 // 一次测试执行的结果。
@@ -203,9 +237,11 @@ export interface WorkflowJob {
   requirement: ProductRequirement;
   stage: JobStage;
   codeWorkspace: CodeWorkspace;
+  logFilePath: string;
   specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
   uiArtifacts: UiArtifact[];
+  alignmentReports: AlignmentReportArtifact[];
   bugReports: BugReport[];
   testRuns: TestRun[];
   agentRuns: AgentRunRecord[];
