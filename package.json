@@ -1,0 +1,20 @@
+{
+  "name": "ui-se",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bootstrap scaffold for an agent-orchestrated UI delivery system.",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
