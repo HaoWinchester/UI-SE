@@ -1,3 +1,5 @@
+// 这个文件负责做工作区权限校验。
+// orchestrator 会用它确认 agent 声称修改的文件是否落在允许的目录范围内。
 import path from "node:path";
 
 // 这个文件负责检查 agent 声称要修改的文件，是否真的在允许范围内。

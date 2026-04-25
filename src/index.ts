@@ -1,3 +1,5 @@
+// 这个文件是命令行入口。
+// 用户从这里输入一句话需求，随后整个 orchestrator 流程会被启动。
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";

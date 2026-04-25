@@ -1,3 +1,5 @@
+// 这个文件定义测试分析 agent。
+// 它不直接执行测试命令，而是根据测试结果决定是否进入修复流程。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FailureMemory, FeatureSpec, TestRun } from "../types/domain.js";

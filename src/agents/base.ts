@@ -1,3 +1,5 @@
+// 这个文件定义所有 agent 共享的基础类型。
+// orchestrator 会依赖这里的契约来统一调用不同角色的 agent。
 import type { JobStage } from "../types/domain.js";
 
 // 所有 agent 的名字都收敛在这里，方便 orchestrator 统一调度。

@@ -1,3 +1,5 @@
+// 这个文件负责给 Node 进程配置代理。
+// 这样 Stitch SDK 在终端环境里也能复用系统代理或显式代理配置。
 import { execFileSync } from "node:child_process";
 
 import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";

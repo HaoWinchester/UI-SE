@@ -1,3 +1,5 @@
+// 这个文件定义修复 agent。
+// 当测试失败或发现 bug 时，它会基于失败记忆生成针对性的修复计划。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { BugReport, FeatureSpec } from "../types/domain.js";

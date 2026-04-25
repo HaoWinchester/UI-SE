@@ -1,3 +1,5 @@
+// 这个文件封装 Stitch 的调用细节。
+// orchestrator 只关心“提交设计、轮询状态、下载产物”，不需要了解底层 SDK 细节。
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";

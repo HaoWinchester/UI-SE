@@ -1,3 +1,5 @@
+// 这个文件定义需求澄清 agent。
+// 它会把一句自然语言需求整理成更接近 Speckit 风格的结构化 spec。
 import { randomUUID } from "node:crypto";
 
 import type { Agent, AgentResult } from "./base.js";

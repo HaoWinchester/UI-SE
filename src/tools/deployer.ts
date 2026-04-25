@@ -1,3 +1,5 @@
+// 这个文件定义部署工具层。
+// 当前版本先用 mock deployer 生成部署记录，后续再替换成真实发布逻辑。
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 

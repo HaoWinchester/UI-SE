@@ -1,3 +1,5 @@
+// 这个文件定义任务存储层接口与内存版实现。
+// orchestrator 通过它保存任务状态，后续也可以很容易替换成数据库实现。
 import type { WorkflowJob } from "../types/domain.js";
 
 // JobStore 是任务存储抽象层。

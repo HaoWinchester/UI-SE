@@ -1,3 +1,5 @@
+// 这个文件保留了通用开发 agent 的定义。
+// 当前主流程已拆成前端和后端 agent，这里更像一个兼容性的通用实现角色。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec } from "../types/domain.js";

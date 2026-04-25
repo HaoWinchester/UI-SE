@@ -1,3 +1,5 @@
+// 这个文件定义后端开发 agent。
+// 它根据功能点和需求上下文，生成后端侧的实现计划与改动范围。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec, ProductRequirement } from "../types/domain.js";

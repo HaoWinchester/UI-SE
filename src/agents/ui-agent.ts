@@ -1,3 +1,5 @@
+// 这个文件定义 UI 生成 agent。
+// 它负责把澄清后的需求转换成更适合 Stitch 使用的设计 prompt。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { ProductRequirement, SpecArtifact } from "../types/domain.js";

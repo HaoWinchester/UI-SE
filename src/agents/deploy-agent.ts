@@ -1,3 +1,5 @@
+// 这个文件定义发布 agent。
+// 它负责在真正执行部署前，给出“是否允许发布”的判断结果。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { WorkflowJob } from "../types/domain.js";

@@ -1,3 +1,5 @@
+// 这个文件是整个项目的编排核心。
+// 它负责把需求澄清、UI 生成、开发、测试、修复、验收和发布串成一条完整工作流。
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";

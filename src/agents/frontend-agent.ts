@@ -1,3 +1,5 @@
+// 这个文件定义前端开发 agent。
+// 它会结合 UI 设计图与功能点信息，输出前端实现思路和涉及的文件范围。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec } from "../types/domain.js";

@@ -1,3 +1,5 @@
+// 这个文件定义测试执行层。
+// 当前提供的是 mock 版本，用来演示功能测试、流程测试和验收测试的串联方式。
 import { randomUUID } from "node:crypto";
 
 import type { BugReport, FeatureSpec, TestRun, WorkflowJob } from "../types/domain.js";

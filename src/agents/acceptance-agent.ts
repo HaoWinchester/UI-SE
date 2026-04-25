@@ -1,3 +1,5 @@
+// 这个文件定义验收 agent。
+// 它负责把当前任务的实现状态整理成一份“是否适合给客户预览”的结论。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { WorkflowJob } from "../types/domain.js";

@@ -1,3 +1,5 @@
+// 这个文件集中维护所有 agent 的注册配置。
+// 每个角色的 system prompt、权限范围和工具白名单都在这里定义。
 import type { AgentDefinition, AgentName } from "./base.js";
 
 // 这个注册表就是 agent 的“配置中心”。

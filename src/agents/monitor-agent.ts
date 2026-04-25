@@ -1,3 +1,5 @@
+// 这个文件定义监控 agent。
+// 它负责在开发流程中检查当前实现是否逐渐偏离原始需求与验收目标。
 import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { WorkflowJob } from "../types/domain.js";
