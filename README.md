@@ -120,10 +120,11 @@ npm run dev -- --yes --no-open
 - `db-agent` 会生成 Prisma schema、PostgreSQL migration、seed 和 repository 文件
 - `fix-agent` 会读取这些文件，并在测试失败后生成修复版改动
 - `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记，以及 Prisma/PostgreSQL 配置是否到位
+- `monitor-agent` 会在每个功能点修复完成后立即检查一次，看前端、后端、数据库层有没有偏离已批准的需求与架构
 
 也就是说，链路已经从“只出实现计划”升级成了：
 
-`UI 确认 -> 生成前端/后端/数据库代码 -> 跑校验 -> 失败则修复代码 -> 复测`
+`UI 确认 -> 生成前端/后端/数据库代码 -> 跑校验 -> 失败则修复代码 -> 复测 -> monitor-agent 检查是否跑偏`
 
 ## Prisma + PostgreSQL 数据层
 

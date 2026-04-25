@@ -519,6 +519,25 @@ export class DeliveryOrchestrator {
     }));
     await this.markFeatureBugsFixed(jobId, featureId);
 
+    const monitoredJob = await this.deps.store.get(jobId);
+    const monitoredFeature = this.requireFeature(monitoredJob, featureId);
+    const featureMonitorResult = await this.executeAgent(
+      jobId,
+      "verifying_alignment",
+      this.deps.monitorAgent,
+      {
+        job: monitoredJob,
+        feature: monitoredFeature,
+      },
+    );
+    if (featureMonitorResult.status === "blocked" || !featureMonitorResult.data.aligned) {
+      await this.updateFeature(jobId, featureId, (current) => ({
+        ...current,
+        status: "blocked",
+      }));
+      return this.blockJob(jobId, featureMonitorResult.summary);
+    }
+
     return this.deps.store.get(jobId);
   }
 
