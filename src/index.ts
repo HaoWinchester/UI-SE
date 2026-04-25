@@ -23,6 +23,9 @@ Build a delivery workflow for an AI-assisted product team.
   console.log(`Agent runs: ${result.agentRuns.length}`);
   console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
   console.log(`UI artifact runtime: ${result.uiArtifact?.runtime ?? "none"}`);
+  if (result.uiArtifact?.note) {
+    console.log(`UI note: ${result.uiArtifact.note}`);
+  }
   console.log(`UI image: ${result.uiArtifact?.imagePath ?? result.uiArtifact?.downloadPath ?? "none"}`);
   console.log(`UI html: ${result.uiArtifact?.htmlPath ?? "none"}`);
   console.log(`Deployment: ${result.deployment?.manifestPath ?? "not deployed"}`);

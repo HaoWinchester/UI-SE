@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Stitch, StitchToolClient } from "@google/stitch-sdk";
@@ -18,6 +18,7 @@ export interface StitchSubmission {
   projectId?: string;
   screenId?: string;
   runtime: "real" | "mock";
+  note?: string;
 }
 
 export interface StitchDownloadResult {
@@ -25,6 +26,7 @@ export interface StitchDownloadResult {
   htmlPath?: string;
   imagePath?: string;
   metadataPath?: string;
+  note?: string;
 }
 
 export interface StitchClient {
@@ -261,23 +263,81 @@ export class RealStitchClient implements StitchClient {
   }
 }
 
+export class FallbackStitchClient implements StitchClient {
+  private readonly fallbackReasons = new Map<string, string>();
+
+  constructor(
+    private readonly primary: StitchClient,
+    private readonly fallback: StitchClient,
+  ) {}
+
+  async submit(prompt: string): Promise<StitchSubmission> {
+    try {
+      return await this.primary.submit(prompt);
+    } catch (error) {
+      const reason = `Real Stitch unavailable, fell back to mock output: ${formatError(error)}`;
+      const submission = await this.fallback.submit(prompt);
+      this.fallbackReasons.set(submission.stitchJobId, reason);
+      return {
+        ...submission,
+        note: reason,
+      };
+    }
+  }
+
+  async getStatus(stitchJobId: string): Promise<StitchJobStatus> {
+    if (this.fallbackReasons.has(stitchJobId)) {
+      return this.fallback.getStatus(stitchJobId);
+    }
+
+    return this.primary.getStatus(stitchJobId);
+  }
+
+  async downloadResult(stitchJobId: string, targetDir: string): Promise<StitchDownloadResult> {
+    if (this.fallbackReasons.has(stitchJobId)) {
+      const result = await this.fallback.downloadResult(stitchJobId, targetDir);
+      const note = this.fallbackReasons.get(stitchJobId);
+
+      if (note && result.metadataPath) {
+        await appendNoteToMetadata(result.metadataPath, note);
+      }
+
+      return {
+        ...result,
+        note,
+      };
+    }
+
+    return this.primary.downloadResult(stitchJobId, targetDir);
+  }
+}
+
 export function createStitchClientFromEnv(): StitchClient {
   const env = readStitchRuntimeEnv();
 
   if (hasRealStitchCredentials(env)) {
-    return new RealStitchClient({
-      apiKey: env.apiKey,
-      accessToken: env.accessToken,
-      googleCloudProject: env.googleCloudProject,
-      projectId: env.projectId,
-      baseUrl: env.baseUrl,
-      timeoutMs: env.timeoutMs,
-      deviceType: env.deviceType,
-      modelId: env.modelId,
-    });
+    return new FallbackStitchClient(
+      new RealStitchClient({
+        apiKey: env.apiKey,
+        accessToken: env.accessToken,
+        googleCloudProject: env.googleCloudProject,
+        projectId: env.projectId,
+        baseUrl: env.baseUrl,
+        timeoutMs: env.timeoutMs,
+        deviceType: env.deviceType,
+        modelId: env.modelId,
+      }),
+      new MockStitchClient(),
+    );
   }
 
   return new MockStitchClient();
+}
+
+async function appendNoteToMetadata(metadataPath: string, note: string): Promise<void> {
+  const payload = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+  payload.note = note;
+  await writeFile(metadataPath, JSON.stringify(payload, null, 2), "utf8");
 }
 
 async function downloadUrlToDirectory(

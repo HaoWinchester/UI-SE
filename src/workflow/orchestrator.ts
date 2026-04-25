@@ -87,7 +87,9 @@ export class DeliveryOrchestrator {
     await this.transition(
       jobId,
       "ui_generating",
-      `Submitted the approved requirement to Stitch as ${submission.stitchJobId}.`,
+      submission.note
+        ? `Submitted the approved requirement to Stitch as ${submission.stitchJobId}. ${submission.note}`
+        : `Submitted the approved requirement to Stitch as ${submission.stitchJobId}.`,
     );
 
     const uiArtifact = await this.waitForUiArtifact(submission);
@@ -270,6 +272,7 @@ export class DeliveryOrchestrator {
     projectId?: string;
     screenId?: string;
     runtime: "real" | "mock";
+    note?: string;
   }): Promise<UiArtifact> {
     // Browser automation and polling remain deterministic tool work. The agent
     // only decides when the workflow should call this tool and how to use the result.
@@ -290,6 +293,7 @@ export class DeliveryOrchestrator {
           imagePath: download.imagePath,
           metadataPath: download.metadataPath,
           runtime: submission.runtime,
+          note: submission.note ?? download.note,
           status: "ready",
         };
       }

@@ -53,6 +53,7 @@ export interface UiArtifact {
   imagePath?: string;
   metadataPath?: string;
   runtime: "real" | "mock";
+  note?: string;
   status: "ready" | "failed";
 }
 
