@@ -37,10 +37,15 @@ export class MonitorAgent implements Agent<MonitorAgentInput, MonitorAgentOutput
     }
 
     const partiallyImplemented = job.requirement.features.filter(
-      (feature) => feature.frontendStatus !== "done" || feature.backendStatus !== "done",
+      (feature) =>
+        feature.frontendStatus !== "done" ||
+        feature.backendStatus !== "done" ||
+        feature.databaseStatus !== "done",
     );
     if (partiallyImplemented.length > 0) {
-      findings.push(`${partiallyImplemented.length} features do not have both frontend and backend completed.`);
+      findings.push(
+        `${partiallyImplemented.length} features do not have frontend, backend, and database delivery fully completed.`,
+      );
     }
 
     const aligned = findings.length === 0;

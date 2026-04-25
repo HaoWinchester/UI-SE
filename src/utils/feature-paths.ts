@@ -10,6 +10,10 @@ export interface FeatureCodePaths {
   frontendStylesPath: string;
   backendRoutePath: string;
   backendSchemaPath: string;
+  databaseRepositoryPath: string;
+  prismaSchemaPath: string;
+  prismaMigrationPath: string;
+  prismaSeedPath: string;
 }
 
 export function getFeatureCodePaths(
@@ -19,6 +23,8 @@ export function getFeatureCodePaths(
   const featureSlug = slugifyFeatureName(feature.name, feature.id);
   const frontendFeatureDir = path.posix.join(workspace.frontendDir, "src", "features", featureSlug);
   const backendFeatureDir = path.posix.join(workspace.backendDir, "src", "features", featureSlug);
+  const databaseFeatureDir = path.posix.join(workspace.databaseDir, "src", "features", featureSlug);
+  const prismaDir = path.posix.join(workspace.databaseDir, "prisma");
 
   return {
     featureSlug,
@@ -26,6 +32,10 @@ export function getFeatureCodePaths(
     frontendStylesPath: path.posix.join(frontendFeatureDir, "feature.css"),
     backendRoutePath: path.posix.join(backendFeatureDir, "route.ts"),
     backendSchemaPath: path.posix.join(backendFeatureDir, "schema.ts"),
+    databaseRepositoryPath: path.posix.join(databaseFeatureDir, "repository.ts"),
+    prismaSchemaPath: path.posix.join(prismaDir, "schema.prisma"),
+    prismaMigrationPath: path.posix.join(prismaDir, "migrations", `${featureSlug}_init`, "migration.sql"),
+    prismaSeedPath: path.posix.join(prismaDir, "seeds", `${featureSlug}.ts`),
   };
 }
 
@@ -45,4 +55,23 @@ export function toPascalCase(value: string): string {
     .filter(Boolean)
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join("");
+}
+
+export function toCamelCase(value: string): string {
+  const pascalCase = toPascalCase(value);
+  return pascalCase ? pascalCase.charAt(0).toLowerCase() + pascalCase.slice(1) : "";
+}
+
+export function getPrismaFeatureNames(featureSlug: string): {
+  modelName: string;
+  delegateName: string;
+  tableName: string;
+} {
+  const baseName = toPascalCase(featureSlug);
+  const modelName = `${baseName}Record`;
+  return {
+    modelName,
+    delegateName: toCamelCase(modelName),
+    tableName: `${featureSlug.replace(/-/g, "_")}_records`,
+  };
 }

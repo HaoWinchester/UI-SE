@@ -58,13 +58,29 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
     name: "backend-agent",
     description: "Plans backend implementation for the current feature slice.",
     systemPrompt:
-      "You are the backend agent. Turn the current feature slice into backend responsibilities, contracts, and validation needs without drifting from the approved requirement.",
+      "You are the backend agent. Turn the current feature slice into backend responsibilities, contracts, and validation needs without drifting from the approved requirement. Assume a Prisma + PostgreSQL data layer is available.",
     runtimeMode: resolveRuntimeModeForProvider("openai"),
     model: {
       provider: "openai",
       model: "gpt-5.4",
       reasoningEffort: "medium",
       temperature: 0.2,
+    },
+    readScopes: ["docs", "artifacts/specs", "artifacts/code-workspace", "skills/dev-agent"],
+    writeScopes: ["artifacts/code-workspace"],
+    tools: ["repo-read", "repo-write", "repo-writer", "model-client"],
+  },
+  "db-agent": {
+    name: "db-agent",
+    description: "Generates Prisma + PostgreSQL data models, migrations, seeds, and repositories for the current feature slice.",
+    systemPrompt:
+      "You are the database agent. Turn the current feature slice into a Prisma + PostgreSQL data layer, including schema additions, migration SQL, repository functions, and seed data without drifting from the approved requirement.",
+    runtimeMode: resolveRuntimeModeForProvider("openai"),
+    model: {
+      provider: "openai",
+      model: "gpt-5.4",
+      reasoningEffort: "medium",
+      temperature: 0.15,
     },
     readScopes: ["docs", "artifacts/specs", "artifacts/code-workspace", "skills/dev-agent"],
     writeScopes: ["artifacts/code-workspace"],

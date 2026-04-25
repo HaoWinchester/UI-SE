@@ -1,5 +1,7 @@
 // 这个文件定义后端开发 agent。
 // 它根据功能点和需求上下文生成后端契约、路由和基础处理逻辑，并直接返回可落盘的代码文件。
+import path from "node:path";
+
 import type { Agent, AgentExecutionContext, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type {
@@ -9,7 +11,7 @@ import type {
   ProductRequirement,
 } from "../types/domain.js";
 import { OpenAiJsonModelClient } from "../tools/model-client.js";
-import { getFeatureCodePaths, toPascalCase } from "../utils/feature-paths.js";
+import { getFeatureCodePaths, getPrismaFeatureNames, toPascalCase } from "../utils/feature-paths.js";
 
 // backend-agent 专门负责后端侧的实现拆解。
 export interface BackendAgentInput {
@@ -44,12 +46,15 @@ export class BackendAgent implements Agent<BackendAgentInput, BackendAgentOutput
   ): Promise<AgentResult<BackendAgentOutput>> {
     const paths = getFeatureCodePaths(codeWorkspace, feature);
     const entityName = `${toPascalCase(paths.featureSlug)}Payload`;
+    const prismaNames = getPrismaFeatureNames(paths.featureSlug);
     const fallbackFileEdits = buildTemplateBackendEdits({
       feature,
       requirement,
       entityName,
       routePath: paths.backendRoutePath,
       schemaPath: paths.backendSchemaPath,
+      repositoryPath: paths.databaseRepositoryPath,
+      prismaNames,
     });
 
     const modelPayload =
@@ -62,6 +67,7 @@ export class BackendAgent implements Agent<BackendAgentInput, BackendAgentOutput
             requirement,
             entityName,
             paths,
+            prismaNames,
           })
         : undefined;
 
@@ -108,6 +114,7 @@ async function tryGenerateBackendWithModel(input: {
   requirement: ProductRequirement;
   entityName: string;
   paths: ReturnType<typeof getFeatureCodePaths>;
+  prismaNames: ReturnType<typeof getPrismaFeatureNames>;
 }): Promise<ModelGeneratedBackendPayload | undefined> {
   try {
     const client = new OpenAiJsonModelClient();
@@ -124,6 +131,7 @@ async function tryGenerateBackendWithModel(input: {
         `Acceptance criteria: ${input.feature.acceptanceCriteria.join(" | ")}`,
         `Write exactly two backend files: ${input.paths.backendRoutePath} and ${input.paths.backendSchemaPath}.`,
         `Use ${input.entityName} as the main request/response payload type root.`,
+        `The backend route should import the Prisma repository from ${input.paths.databaseRepositoryPath} and use delegate ${input.prismaNames.delegateName}.`,
         "Generate plain TypeScript without external runtime dependencies.",
         "Keep one realistic TODO comment so the fix loop has a concrete backend issue to repair later.",
       ].join("\n"),
@@ -150,19 +158,27 @@ function buildTemplateBackendEdits(input: {
   entityName: string;
   routePath: string;
   schemaPath: string;
+  repositoryPath: string;
+  prismaNames: ReturnType<typeof getPrismaFeatureNames>;
 }): CodeFileEdit[] {
   const entityName = input.entityName;
+  const routeImportPath = toImportPath(input.routePath, input.repositoryPath);
   const routeContent = [
     `import type { ${entityName}Request, ${entityName}Response } from "./schema";`,
+    `import { create${input.prismaNames.modelName}, list${input.prismaNames.modelName} } from "${routeImportPath}";`,
     "",
     `export async function handle${entityName}(payload: ${entityName}Request): Promise<${entityName}Response> {`,
     "  validatePayload(payload);",
+    `  const records = await list${input.prismaNames.modelName}();`,
+    `  const createdRecord = await create${input.prismaNames.modelName}(payload);`,
     "",
     "  return {",
     `    featureId: "${input.feature.id}",`,
     `    featureName: "${toTemplateText(input.feature.name)}",`,
     '    status: "ready",',
     "    nextActions: payload.requestedActions.length > 0 ? payload.requestedActions : [\"review\", \"confirm\"],",
+    "    existingCount: records.length,",
+    "    persistedId: createdRecord.id,",
     "  };",
     "}",
     "",
@@ -187,6 +203,8 @@ function buildTemplateBackendEdits(input: {
     "  featureName: string;",
     '  status: "ready";',
     "  nextActions: string[];",
+    "  existingCount: number;",
+    "  persistedId: string;",
     "}",
     "",
     `export const ${entityName}RequirementSummary = "${toTemplateText(input.requirement.summary)}";`,
@@ -216,4 +234,10 @@ function toTemplateText(value: string): string {
     .replace(/"/g, '\\"')
     .replace(/\r?\n/g, " ")
     .trim();
+}
+
+function toImportPath(fromFilePath: string, targetFilePath: string): string {
+  const relativePath = path.posix.relative(path.posix.dirname(fromFilePath), targetFilePath);
+  const withoutExtension = relativePath.replace(/\.[^.]+$/, "");
+  return withoutExtension.startsWith(".") ? withoutExtension : `./${withoutExtension}`;
 }

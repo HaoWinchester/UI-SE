@@ -47,6 +47,7 @@ export interface CodeWorkspace {
   rootDir: string;
   frontendDir: string;
   backendDir: string;
+  databaseDir: string;
   testsDir: string;
 }
 
@@ -59,6 +60,7 @@ export interface FeatureSpec {
   status: FeatureStatus;
   frontendStatus: DeliveryTrackStatus;
   backendStatus: DeliveryTrackStatus;
+  databaseStatus: DeliveryTrackStatus;
   implementationAttempts: number;
   testAttempts: number;
   failureHistory: FailureMemory[];

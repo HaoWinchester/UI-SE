@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { BugReport, FeatureSpec, TestRun, WorkflowJob } from "../types/domain.js";
-import { getFeatureCodePaths } from "../utils/feature-paths.js";
+import { getFeatureCodePaths, getPrismaFeatureNames } from "../utils/feature-paths.js";
 
 // TestRunner 是测试执行层的抽象。
 // 它会读取当前工作区里生成的代码文件，并根据规则给出测试结果。
@@ -26,7 +26,12 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
       paths.frontendStylesPath,
       paths.backendRoutePath,
       paths.backendSchemaPath,
+      paths.databaseRepositoryPath,
+      paths.prismaSchemaPath,
+      paths.prismaMigrationPath,
+      paths.prismaSeedPath,
     ];
+    const prismaNames = getPrismaFeatureNames(paths.featureSlug);
 
     for (const relativePath of requiredFiles) {
       const content = await this.readGeneratedFile(relativePath);
@@ -79,6 +84,90 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
       );
     }
 
+    if (backendRouteContent && !backendRouteContent.includes(`create${prismaNames.modelName}`)) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Backend route is not connected to the Prisma repository",
+          `The generated backend route at ${paths.backendRoutePath} does not appear to call create${prismaNames.modelName} from the database layer.`,
+        ),
+      );
+    }
+
+    const repositoryContent = await this.readGeneratedFile(paths.databaseRepositoryPath);
+    if (repositoryContent && !repositoryContent.includes("new PrismaClient()")) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Database repository is missing a Prisma client",
+          `The generated repository at ${paths.databaseRepositoryPath} does not instantiate PrismaClient.`,
+        ),
+      );
+    }
+
+    if (repositoryContent && /TODO:/i.test(repositoryContent)) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Database repository still contains TODO placeholders",
+          `The generated repository at ${paths.databaseRepositoryPath} still contains unfinished TODO placeholders.`,
+        ),
+      );
+    }
+
+    const prismaSchemaContent = await this.readGeneratedFile(paths.prismaSchemaPath);
+    if (prismaSchemaContent && !prismaSchemaContent.includes('provider = "postgresql"')) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Prisma schema is not configured for PostgreSQL",
+          `The generated Prisma schema at ${paths.prismaSchemaPath} is missing the postgresql datasource configuration.`,
+        ),
+      );
+    }
+
+    if (prismaSchemaContent && !prismaSchemaContent.includes(`model ${prismaNames.modelName} {`)) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Prisma model is missing from schema",
+          `The generated Prisma schema at ${paths.prismaSchemaPath} does not include model ${prismaNames.modelName}.`,
+        ),
+      );
+    }
+
+    const migrationContent = await this.readGeneratedFile(paths.prismaMigrationPath);
+    if (migrationContent && !migrationContent.includes("CREATE TABLE")) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Database migration does not create a table",
+          `The generated migration at ${paths.prismaMigrationPath} does not contain a CREATE TABLE statement.`,
+        ),
+      );
+    }
+
+    const seedContent = await this.readGeneratedFile(paths.prismaSeedPath);
+    if (seedContent && !seedContent.includes(".upsert(")) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Seed script is missing upsert logic",
+          `The generated seed at ${paths.prismaSeedPath} does not include an upsert call.`,
+        ),
+      );
+    }
+
+    if (seedContent && /TODO:/i.test(seedContent)) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Seed script still contains TODO placeholders",
+          `The generated seed at ${paths.prismaSeedPath} still contains unfinished TODO placeholders.`,
+        ),
+      );
+    }
+
     const passed = bugs.length === 0;
     return {
       id: randomUUID(),
@@ -95,7 +184,7 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
 
   async runFlowTests(job: WorkflowJob): Promise<TestRun> {
     const unfinished = job.requirement.features.filter((feature) => feature.status !== "done");
-    const missingArtifacts = job.requirement.features.filter((feature) => feature.generatedFiles.length < 4);
+    const missingArtifacts = job.requirement.features.filter((feature) => feature.generatedFiles.length < 8);
 
     return {
       id: randomUUID(),

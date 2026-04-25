@@ -22,6 +22,15 @@ export class FileSystemRepoWriter implements RepoWriter {
       mkdir(path.join(this.toAbsolutePath(workspace.backendDir), "src", "features"), {
         recursive: true,
       }),
+      mkdir(path.join(this.toAbsolutePath(workspace.databaseDir), "src", "features"), {
+        recursive: true,
+      }),
+      mkdir(path.join(this.toAbsolutePath(workspace.databaseDir), "prisma", "migrations"), {
+        recursive: true,
+      }),
+      mkdir(path.join(this.toAbsolutePath(workspace.databaseDir), "prisma", "seeds"), {
+        recursive: true,
+      }),
       mkdir(this.toAbsolutePath(workspace.testsDir), { recursive: true }),
     ]);
 
@@ -36,7 +45,7 @@ export class FileSystemRepoWriter implements RepoWriter {
         content: [
           "# Generated delivery workspace",
           "",
-          "This directory stores generated frontend, backend, and test artifacts for a single workflow job.",
+          "This directory stores generated frontend, backend, database, and test artifacts for a single workflow job.",
           "Files here are produced by the orchestrator and can be replaced on subsequent runs.",
         ].join("\n"),
         description: "Generated workspace introduction",
@@ -88,6 +97,7 @@ export function createCodeWorkspace(jobId: string): CodeWorkspace {
     rootDir,
     frontendDir: path.posix.join(rootDir, "frontend"),
     backendDir: path.posix.join(rootDir, "backend"),
+    databaseDir: path.posix.join(rootDir, "database"),
     testsDir: path.posix.join(rootDir, "tests"),
   };
 }

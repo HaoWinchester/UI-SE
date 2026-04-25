@@ -80,7 +80,7 @@ npm run dev -- --yes --no-open
 4. `ui-agent` 基于澄清后的 spec 组织 Stitch prompt
 5. `stitch-client` 调用 Stitch 生成并下载 UI 到 `artifacts/ui/<jobId>/v<版本号>/`
 6. 询问是否满意当前 UI，不满意则带着反馈重新生成下一版
-7. 满意后再进入 `frontend-agent -> backend-agent -> test-agent -> fix-agent`
+7. 满意后再进入 `frontend-agent -> backend-agent -> db-agent -> test-agent -> fix-agent`
 8. 最终通过 `monitor-agent -> acceptance-agent -> deploy-agent`
 
 也就是说，现在已经不是“把原始一句话直接发给 Stitch”，而是：
@@ -100,7 +100,8 @@ npm run dev -- --yes --no-open
 - 正在等待你确认是否满意当前设计
 - `frontend-agent` 已写入 2 个代码文件
 - `backend-agent` 已写入 2 个代码文件
-- `fix-agent` 已写入 2 个代码文件
+- `db-agent` 已写入 4 个代码文件
+- `fix-agent` 已写入 3 到 4 个代码文件
 - 正在等待你确认是否允许发布
 
 ## 代码工作区
@@ -109,18 +110,41 @@ npm run dev -- --yes --no-open
 
 - `artifacts/code-workspace/<jobId>/frontend`
 - `artifacts/code-workspace/<jobId>/backend`
+- `artifacts/code-workspace/<jobId>/database`
 - `artifacts/code-workspace/<jobId>/tests`
 
 当前版本里：
 
 - `frontend-agent` 会生成前端组件和样式文件
 - `backend-agent` 会生成路由和 schema 文件
+- `db-agent` 会生成 Prisma schema、PostgreSQL migration、seed 和 repository 文件
 - `fix-agent` 会读取这些文件，并在测试失败后生成修复版改动
-- `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记
+- `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记，以及 Prisma/PostgreSQL 配置是否到位
 
 也就是说，链路已经从“只出实现计划”升级成了：
 
-`UI 确认 -> 生成前端/后端代码 -> 跑校验 -> 失败则修复代码 -> 复测`
+`UI 确认 -> 生成前端/后端/数据库代码 -> 跑校验 -> 失败则修复代码 -> 复测`
+
+## Prisma + PostgreSQL 数据层
+
+当前版本已经把数据库层纳入编排：
+
+- `db-agent` 负责为每个功能点生成 Prisma + PostgreSQL 数据模型
+- 会生成共享的 `schema.prisma`
+- 会为每个功能点生成独立 migration SQL
+- 会生成每个功能点的 seed 文件
+- 会生成给后端使用的 repository 层
+
+生成结果会放在：
+
+- `artifacts/code-workspace/<jobId>/database/prisma/schema.prisma`
+- `artifacts/code-workspace/<jobId>/database/prisma/migrations/<feature>_init/migration.sql`
+- `artifacts/code-workspace/<jobId>/database/prisma/seeds/<feature>.ts`
+- `artifacts/code-workspace/<jobId>/database/src/features/<feature>/repository.ts`
+
+这意味着现在的后端代码不只是“留个接口壳子”，而是会显式引用数据库仓储层，形成：
+
+`前端 -> 后端 -> Prisma repository -> PostgreSQL schema/migration/seed`
 
 ## UI 版本管理
 
@@ -189,6 +213,7 @@ npm run dev -- --yes --no-open
 - `STITCH_MODEL_ID`：`GEMINI_3_PRO`、`GEMINI_3_FLASH`、`GEMINI_3_1_PRO`
 - `STITCH_HOST`：自定义 Stitch MCP 地址
 - `STITCH_PROXY_URL`：手动指定 Stitch 请求走哪个代理
+- `DATABASE_URL`：Prisma/PostgreSQL 的连接串，用于后续接入真实数据库执行阶段
 
 ## 代理行为
 
@@ -210,8 +235,9 @@ npm run dev -- --yes --no-open
 - UI 满意度确认后再继续开发
 - Stitch SDK 调用与 UI 下载
 - 任务级独立代码工作区
-- 前端/后端代码文件生成与落盘
+- 前端/后端/数据库代码文件生成与落盘
 - 基于生成文件的测试与修复闭环
+- Prisma + PostgreSQL 数据层骨架
 - 最终发布前客户确认
 - 产物落盘到 `artifacts/`
 
@@ -226,14 +252,15 @@ npm run dev -- --yes --no-open
 
 `需求 -> spec -> Stitch -> UI 确认 -> 前后端代码生成 -> 文件级测试/修复 -> 客户确认 -> 部署`
 
-其中部署还是 mock，但开发、测试和修复已经不再只是口头规划，而是会生成和修补实际代码文件。
+其中部署还是 mock，但开发、测试和修复已经不再只是口头规划，而是会生成和修补实际代码文件；数据库层也已经能生成 Prisma + PostgreSQL 所需的核心文件。
 
 ## 推荐下一步
 
 如果你准备继续往下做，最值得优先推进的是：
 
 1. 把 `spec-agent` 从“自动澄清”升级成“可交互追问”的 clarify loop
-2. 把当前文件级测试规则换成你的真实前端/后端测试命令
+2. 把当前文件级测试规则换成真实的前端/后端/API/数据库测试命令
 3. 把生成代码目录从 `artifacts/code-workspace` 接到真实业务仓库
-4. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
-5. 把 job 存储从内存换成 SQLite 或 Postgres
+4. 让 Prisma migration 和 seed 真正执行到 PostgreSQL
+5. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
+6. 把 job 存储从内存换成 SQLite 或 Postgres

@@ -8,6 +8,7 @@ export type AgentName =
   | "ui-agent"
   | "frontend-agent"
   | "backend-agent"
+  | "db-agent"
   | "dev-agent"
   | "test-agent"
   | "fix-agent"

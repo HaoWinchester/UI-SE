@@ -8,6 +8,7 @@ import type { Agent, AgentDefinition, AgentExecutionContext, AgentResult } from 
 import { createExecutionContext } from "../agents/base.js";
 import { AcceptanceAgent } from "../agents/acceptance-agent.js";
 import { BackendAgent } from "../agents/backend-agent.js";
+import { DbAgent } from "../agents/db-agent.js";
 import { DeployAgent } from "../agents/deploy-agent.js";
 import { FixAgent } from "../agents/fix-agent.js";
 import { FrontendAgent } from "../agents/frontend-agent.js";
@@ -70,6 +71,7 @@ interface OrchestratorDependencies {
   uiAgent: UiAgent;
   frontendAgent: FrontendAgent;
   backendAgent: BackendAgent;
+  dbAgent: DbAgent;
   testAgent: TestAgent;
   fixAgent: FixAgent;
   monitorAgent: MonitorAgent;
@@ -371,6 +373,7 @@ export class DeliveryOrchestrator {
       status: "in_development",
       frontendStatus: "in_progress",
       backendStatus: "pending",
+      databaseStatus: "pending",
       implementationAttempts: current.implementationAttempts + 1,
     }));
 
@@ -388,6 +391,7 @@ export class DeliveryOrchestrator {
       frontendStatus: "done",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, frontendResult.changedFiles),
       backendStatus: "in_progress",
+      databaseStatus: "pending",
     }));
 
     const backendFeatureInput = this.requireFeature(await this.deps.store.get(jobId), featureId);
@@ -398,9 +402,23 @@ export class DeliveryOrchestrator {
     });
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
+      frontendStatus: "done",
       backendStatus: "done",
-      status: "awaiting_test",
+      databaseStatus: "in_progress",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, backendResult.changedFiles),
+    }));
+
+    const dbFeatureInput = this.requireFeature(await this.deps.store.get(jobId), featureId);
+    const dbResult = await this.executeAgent(jobId, "implementing_feature", this.deps.dbAgent, {
+      feature: dbFeatureInput,
+      requirement: job.requirement,
+      codeWorkspace: job.codeWorkspace,
+    });
+    await this.updateFeature(jobId, featureId, (current) => ({
+      ...current,
+      databaseStatus: "done",
+      status: "awaiting_test",
+      generatedFiles: mergeGeneratedFiles(current.generatedFiles, dbResult.changedFiles),
     }));
 
     await this.transition(
@@ -986,6 +1004,7 @@ export function createDefaultOrchestrator(
     uiAgent: new UiAgent(),
     frontendAgent: new FrontendAgent(),
     backendAgent: new BackendAgent(),
+    dbAgent: new DbAgent(),
     testAgent: new TestAgent(),
     fixAgent: new FixAgent(),
     monitorAgent: new MonitorAgent(),

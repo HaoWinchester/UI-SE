@@ -239,6 +239,7 @@ function createFeature(name: string, index: number): FeatureSpec {
     status: "pending",
     frontendStatus: "pending",
     backendStatus: "pending",
+    databaseStatus: "pending",
     implementationAttempts: 0,
     testAttempts: 0,
     failureHistory: [],
