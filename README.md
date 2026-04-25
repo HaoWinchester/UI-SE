@@ -22,7 +22,9 @@
 - `src/agents`：各个 agent 的角色定义与默认实现
 - `src/tools`：Stitch、数据库执行、面板生成、测试、部署等确定性工具层
 - `src/storage`：任务存储抽象，目前是内存实现
-- `skills`：每个 agent 对应的早期 `SKILL.md`
+- `skills`：每个 agent 的本地 skill，以及复制进仓库的 `speckit-*` skill
+- `.specify`：Speckit 期望的模板、memory、bash 脚本骨架
+- `specs`：Speckit 风格的规格目录
 - `artifacts`：生成的 spec、UI、测试结果、部署清单等产物
 
 ## 快速开始
@@ -259,6 +261,24 @@ npm run dev -- --yes --no-open
 - `artifacts/specs`
 
 这份 spec 既能给人看，也会被后续 `ui-agent` 用来组织发给 Stitch 的 prompt。
+
+## Speckit 集成
+
+当前仓库里已经补进了最小可用的 Speckit 结构：
+
+- `.specify/templates/*`
+- `.specify/memory/constitution.md`
+- `.specify/scripts/bash/*`
+- `skills/speckit-*`
+- `specs/`
+
+并且现在每次 orchestrator 生成澄清后的 spec 时，都会同步写一份到 `specs/<编号>-<短名>/spec.md`。  
+终端运行结束后也会打印：
+
+- `Spec: ...`：工作流内部使用的 spec 产物
+- `Speckit spec: ...`：同步写入 `specs/` 的 Speckit 路径
+
+这样你后面如果要继续用 `speckit-clarify`、`speckit-plan`、`speckit-tasks`，就有正式目录可接，而不是只停留在当前项目自定义的 `spec-agent`。
 
 ## Stitch 配置
 

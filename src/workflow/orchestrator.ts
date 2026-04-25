@@ -22,6 +22,7 @@ import { StaticHtmlDashboardBuilder, type DashboardBuilder } from "../tools/dash
 import { PostgresDatabaseRunner, type DatabaseRunner } from "../tools/database-runner.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
 import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../tools/repo-writer.js";
+import { persistSpeckitSpecWorkspace } from "../tools/speckit-workspace.js";
 import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
 import { GeneratedWorkspaceTestRunner, type TestRunner } from "../tools/test-runner.js";
 import type {
@@ -119,7 +120,11 @@ export class DeliveryOrchestrator {
       { rawRequirement },
     );
     const now = specExecution.record.createdAt;
-    const specArtifact = await this.persistSpecArtifact(jobId, specExecution.result.data.specMarkdown);
+    const specArtifact = await this.persistSpecArtifact(
+      jobId,
+      specExecution.result.data.requirement,
+      specExecution.result.data.specMarkdown,
+    );
     this.notifyProgress(`需求澄清完成，spec 已写入 ${specArtifact.markdownPath}。`);
 
     const job: WorkflowJob = {
@@ -380,18 +385,31 @@ export class DeliveryOrchestrator {
   }
 
   // 把澄清后的 spec 落到 artifacts/specs，方便人工查看，也方便后续 agent 复用。
-  private async persistSpecArtifact(jobId: string, specMarkdown: string): Promise<SpecArtifact> {
+  private async persistSpecArtifact(
+    jobId: string,
+    requirement: WorkflowJob["requirement"],
+    specMarkdown: string,
+  ): Promise<SpecArtifact> {
     const clarifiedAt = new Date().toISOString();
     const artifactDir = path.join(this.deps.baseDir, "artifacts", "specs");
     await mkdir(artifactDir, { recursive: true });
 
     const markdownPath = path.join(artifactDir, `spec-${jobId}.md`);
     await writeFile(markdownPath, specMarkdown, "utf8");
+    const speckitWorkspace = await persistSpeckitSpecWorkspace(
+      this.deps.baseDir,
+      requirement,
+      specMarkdown,
+    );
 
     return {
       markdownPath,
       markdown: specMarkdown,
       clarifiedAt,
+      speckitFeatureDir: speckitWorkspace?.featureDir,
+      speckitSpecPath: speckitWorkspace?.specPath,
+      speckitChecklistPath: speckitWorkspace?.checklistPath,
+      speckitBranchName: speckitWorkspace?.branchName,
     };
   }
 

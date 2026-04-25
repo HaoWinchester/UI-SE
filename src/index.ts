@@ -70,6 +70,7 @@ async function main(): Promise<void> {
     console.log(`Job: ${result.id}`);
     console.log(`Stage: ${result.stage}`);
     console.log(`Spec: ${result.specArtifact?.markdownPath ?? "none"}`);
+    console.log(`Speckit spec: ${result.specArtifact?.speckitSpecPath ?? "none"}`);
     console.log(`Clarifications: ${result.requirement.clarifications.length}`);
     console.log(`Features: ${result.requirement.features.length}`);
     console.log(`UI versions: ${result.uiArtifacts.length}`);
