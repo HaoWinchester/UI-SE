@@ -58,6 +58,8 @@ The tool layer owns deterministic actions:
 - deployment
 - storage
 
+The Stitch tool path now also owns explicit proxy handling because the runtime environment may need a manually configured Node fetch dispatcher even when the desktop has a working system proxy.
+
 ## Why skills exist in this design
 
 Skills are not the workflow itself. They are reusable operating guides for each agent role.

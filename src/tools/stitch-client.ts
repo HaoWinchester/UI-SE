@@ -10,6 +10,7 @@ import {
   type StitchDeviceType,
   type StitchModelId,
 } from "../config/env.js";
+import { configureNodeHttpProxy } from "../config/proxy.js";
 
 export type StitchJobStatus = "queued" | "running" | "completed" | "failed";
 
@@ -316,6 +317,8 @@ export function createStitchClientFromEnv(): StitchClient {
   const env = readStitchRuntimeEnv();
 
   if (hasRealStitchCredentials(env)) {
+    const proxy = configureNodeHttpProxy();
+
     return new FallbackStitchClient(
       new RealStitchClient({
         apiKey: env.apiKey,

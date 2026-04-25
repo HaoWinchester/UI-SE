@@ -48,10 +48,21 @@ Optional settings:
 - `STITCH_DEVICE_TYPE`: `DESKTOP`, `MOBILE`, `TABLET`, or `AGNOSTIC`
 - `STITCH_MODEL_ID`: `GEMINI_3_PRO`, `GEMINI_3_FLASH`, or `GEMINI_3_1_PRO`
 - `STITCH_HOST`: override the default Stitch MCP endpoint
+- `STITCH_PROXY_URL`: force a specific HTTP proxy for Stitch requests
+
+## Proxy behavior
+
+When real Stitch credentials are present, the runtime now supports proxy routing in this order:
+
+1. explicit `STITCH_PROXY_URL`
+2. standard `HTTP_PROXY` / `HTTPS_PROXY`
+3. automatic macOS system proxy detection through `scutil --proxy`
+
+This is important because the Stitch SDK itself does not expose a dedicated proxy option, and the Node runtime in this environment did not automatically honor the system proxy without an explicit `undici` dispatcher.
 
 ## Recommended next steps
 
-1. Validate the Stitch SDK flow with real credentials and, only if needed, add Playwright for gaps the SDK does not cover.
+1. Expand Stitch handling with richer project reuse, edit flows, and variants when needed.
 2. Swap the mock agents for real model-backed agents.
 3. Persist jobs in SQLite or Postgres instead of memory.
 4. Connect `MockTestRunner` to your actual test commands and CI signals.

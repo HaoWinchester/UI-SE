@@ -27,7 +27,7 @@ Verification:
 
 ### v0.2 Real Stitch integration
 
-Status: implemented in code, credentialed verification pending
+Status: completed
 
 Scope:
 
@@ -41,6 +41,7 @@ Verification:
 - submit a sample requirement to Stitch
 - wait for completion
 - download both the UI screenshot and HTML successfully
+- confirm proxy support works through explicit config or macOS system proxy detection
 
 ### v0.3 Model-backed agent runtime
 
