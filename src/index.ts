@@ -78,6 +78,7 @@ async function main(): Promise<void> {
     console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
     console.log(`Workflow log: ${path.join(workspaceRoot, result.logFilePath)}`);
     console.log(`Dashboard: ${result.dashboardArtifact ? path.join(workspaceRoot, result.dashboardArtifact.htmlPath) : "none"}`);
+    console.log(`Customer preview: ${result.customerPreviewArtifact?.serverUrl ?? "none"}`);
     console.log(`Alignment reports: ${result.alignmentReports.length}`);
     console.log(`Database runs: ${result.databaseRuns.length}`);
     console.log(`Code workspace: ${path.join(workspaceRoot, result.codeWorkspace.rootDir)}`);

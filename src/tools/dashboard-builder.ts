@@ -149,6 +149,11 @@ function buildDashboardHtml(
         }
         <div class="link-row">
           ${
+            job.customerPreviewArtifact
+              ? `<a href="${escapeHtml(job.customerPreviewArtifact.serverUrl)}">打开客户预览页</a>`
+              : ""
+          }
+          ${
             job.uiArtifact.htmlPath
               ? `<a href="${toFileHref(job.uiArtifact.htmlPath)}">打开 HTML 预览</a>`
               : ""

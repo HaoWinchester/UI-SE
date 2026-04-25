@@ -211,6 +211,17 @@ export interface DashboardArtifact {
   generatedAt: string;
 }
 
+// 客户预览页是最终给客户查看的本地可访问页面。
+export interface CustomerPreviewArtifact {
+  directoryPath: string;
+  htmlPath: string;
+  serverUrl: string;
+  port: number;
+  generatedAt: string;
+  approvedUiHtmlPath?: string;
+  approvedUiImagePath?: string;
+}
+
 // 一次测试执行的结果。
 export interface TestRun {
   id: string;
@@ -265,6 +276,7 @@ export interface WorkflowJob {
   codeWorkspace: CodeWorkspace;
   logFilePath: string;
   dashboardArtifact?: DashboardArtifact;
+  customerPreviewArtifact?: CustomerPreviewArtifact;
   specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
   uiArtifacts: UiArtifact[];

@@ -19,7 +19,11 @@ export class AcceptanceAgent implements Agent<AcceptanceAgentInput, AcceptanceAg
   readonly definition = agentRegistry["acceptance-agent"];
 
   async run({ job }: AcceptanceAgentInput): Promise<AgentResult<AcceptanceAgentOutput>> {
-    const previewPath = job.uiArtifact?.htmlPath ?? job.uiArtifact?.imagePath ?? job.uiArtifact?.downloadPath;
+    const previewPath =
+      job.customerPreviewArtifact?.serverUrl ??
+      job.uiArtifact?.htmlPath ??
+      job.uiArtifact?.imagePath ??
+      job.uiArtifact?.downloadPath;
     const openBugs = job.bugReports.filter((bug) => bug.status === "open");
     const unfinishedFeatures = job.requirement.features.filter((feature) => feature.status !== "done");
     const readyForCustomerReview = Boolean(previewPath) && openBugs.length === 0 && unfinishedFeatures.length === 0;

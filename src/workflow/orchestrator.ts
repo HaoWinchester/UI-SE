@@ -17,6 +17,7 @@ import { SpecAgent } from "../agents/spec-agent.js";
 import { TestAgent } from "../agents/test-agent.js";
 import { UiAgent } from "../agents/ui-agent.js";
 import { InMemoryJobStore, type JobStore } from "../storage/job-store.js";
+import { StaticCustomerPreviewManager, type CustomerPreviewManager } from "../tools/customer-preview.js";
 import { StaticHtmlDashboardBuilder, type DashboardBuilder } from "../tools/dashboard-builder.js";
 import { PostgresDatabaseRunner, type DatabaseRunner } from "../tools/database-runner.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
@@ -89,6 +90,7 @@ interface OrchestratorDependencies {
   deployer: Deployer;
   databaseRunner: DatabaseRunner;
   dashboardBuilder: DashboardBuilder;
+  customerPreviewManager: CustomerPreviewManager;
   baseDir: string;
   onProgress?: (message: string) => void;
   requestUiApproval?: (request: UiApprovalRequest) => Promise<UiApprovalDecision>;
@@ -240,6 +242,7 @@ export class DeliveryOrchestrator {
       "previewing_release",
       "Preparing final customer preview before deployment approval.",
     );
+    await this.prepareCustomerPreview(jobId);
     job = await this.deps.store.get(jobId);
     const acceptanceDecision = await this.executeAgent(
       jobId,
@@ -1213,6 +1216,26 @@ export class DeliveryOrchestrator {
     await this.refreshDashboard(jobId);
   }
 
+  private async prepareCustomerPreview(jobId: string): Promise<void> {
+    const job = await this.deps.store.get(jobId);
+    const customerPreviewArtifact = await this.deps.customerPreviewManager.prepare(job);
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      customerPreviewArtifact,
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: customerPreviewArtifact.generatedAt,
+      level: "info",
+      stage: "previewing_release",
+      message: `Customer preview is ready at ${customerPreviewArtifact.serverUrl}.`,
+      details: {
+        htmlPath: customerPreviewArtifact.htmlPath,
+        port: customerPreviewArtifact.port,
+      },
+    });
+    await this.refreshDashboard(jobId);
+  }
+
   private async updateFeature(
     jobId: string,
     featureId: string,
@@ -1385,6 +1408,7 @@ export function createDefaultOrchestrator(
     deployer: new MockDeployer(baseDir),
     databaseRunner: new PostgresDatabaseRunner(baseDir),
     dashboardBuilder: new StaticHtmlDashboardBuilder(baseDir),
+    customerPreviewManager: new StaticCustomerPreviewManager(baseDir),
     baseDir,
     onProgress: hooks.onProgress,
     requestUiApproval: hooks.requestUiApproval,
