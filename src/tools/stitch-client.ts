@@ -70,11 +70,13 @@ interface RealStitchRecord {
 export class MockStitchClient implements StitchClient {
   private readonly jobs = new Map<string, MockStitchRecord>();
 
+  constructor(private readonly note?: string) {}
+
   async submit(prompt: string): Promise<StitchSubmission> {
     // mock 模式下只记录 prompt，不会真的请求 Stitch。
     const stitchJobId = `stitch-${randomUUID()}`;
     this.jobs.set(stitchJobId, { prompt, polls: 0 });
-    return { stitchJobId, runtime: "mock" };
+    return { stitchJobId, runtime: "mock", note: this.note };
   }
 
   async getStatus(stitchJobId: string): Promise<StitchJobStatus> {
@@ -136,6 +138,7 @@ export class MockStitchClient implements StitchClient {
           prompt: job.prompt,
           htmlPath,
           imagePath,
+          note: this.note,
         },
         null,
         2,
@@ -148,6 +151,7 @@ export class MockStitchClient implements StitchClient {
       htmlPath,
       imagePath,
       metadataPath,
+      note: this.note,
     };
   }
 }
@@ -351,7 +355,9 @@ export function createStitchClientFromEnv(): StitchClient {
     );
   }
 
-  return new MockStitchClient();
+  return new MockStitchClient(
+    "Real Stitch credentials were not detected for this run, so the workflow used mock UI output only.",
+  );
 }
 
 // 给 metadata 追加降级说明，方便后面排查为什么这次不是走的真实 Stitch。

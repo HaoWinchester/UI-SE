@@ -10,6 +10,7 @@ import type {
   SpecClarificationAnswer,
   SpecClarificationQuestion,
 } from "./agents/spec-agent.js";
+import { hasRealStitchCredentials, readStitchRuntimeEnv } from "./config/env.js";
 import type { UiArtifact } from "./types/domain.js";
 import type {
   OrchestratorRuntimeHooks,
@@ -61,6 +62,8 @@ async function main(): Promise<void> {
   const interactionHooks = createInteractionHooks(cliOptions);
 
   try {
+    const stitchRuntimeEnv = readStitchRuntimeEnv();
+    const hasRealStitch = hasRealStitchCredentials(stitchRuntimeEnv);
     const orchestrator = createDefaultOrchestrator(workspaceRoot, {
       onProgress: createConsoleProgressLogger(),
       requestSpecClarification: interactionHooks.requestSpecClarification,
@@ -69,6 +72,11 @@ async function main(): Promise<void> {
     });
 
     console.log(`已接收需求输入，来源：${requirementInput.sourceLabel}`);
+    if (hasRealStitch) {
+      console.log("Stitch 模式：已检测到真实凭证，本次会先尝试真实 Stitch，失败时再回退到 mock。");
+    } else {
+      console.log("Stitch 模式：未检测到真实凭证，本次会直接使用 mock UI，不会真正请求 Stitch。");
+    }
 
     const job = await orchestrator.createJob(requirementInput.rawRequirement);
     const result = await orchestrator.run(job.id);
@@ -92,6 +100,15 @@ async function main(): Promise<void> {
     console.log(`Code workspace: ${path.join(workspaceRoot, result.codeWorkspace.rootDir)}`);
     console.log(
       `Generated code files: ${result.requirement.features.reduce((total, feature) => total + feature.generatedFiles.length, 0)}`,
+    );
+    console.log(
+      `Stitch execution: ${
+        result.uiArtifact?.runtime === "real"
+          ? "real"
+          : hasRealStitch
+            ? "fallback-to-mock"
+            : "mock-only"
+      }`,
     );
     console.log(`UI artifact runtime: ${result.uiArtifact?.runtime ?? "none"}`);
     if (result.uiArtifact?.note) {
