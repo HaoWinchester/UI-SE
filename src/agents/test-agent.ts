@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec, TestRun } from "../types/domain.js";
 
+// test-agent 不负责真正跑测试命令，它负责解释测试结果并决定下一步。
 export interface TestAgentInput {
   feature: FeatureSpec;
   testRun: TestRun;

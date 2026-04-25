@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { BugReport, FeatureSpec } from "../types/domain.js";
 
+// fix-agent 负责把 bug 列表转换成一份修复计划。
 export interface FixAgentInput {
   feature: FeatureSpec;
   bugReports: BugReport[];

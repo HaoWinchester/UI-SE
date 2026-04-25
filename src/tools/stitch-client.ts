@@ -12,9 +12,12 @@ import {
 } from "../config/env.js";
 import { configureNodeHttpProxy } from "../config/proxy.js";
 
+// StitchClient 是“生成 UI”这一步的执行层抽象。
+// orchestrator 只关心 submit / getStatus / downloadResult 这三个动作。
 export type StitchJobStatus = "queued" | "running" | "completed" | "failed";
 
 export interface StitchSubmission {
+  // stitchJobId 是 orchestrator 后续轮询状态时用的主键。
   stitchJobId: string;
   projectId?: string;
   screenId?: string;
@@ -23,6 +26,7 @@ export interface StitchSubmission {
 }
 
 export interface StitchDownloadResult {
+  // downloadPath 统一表示“当前阶段最主要的可消费产物路径”。
   downloadPath: string;
   htmlPath?: string;
   imagePath?: string;
@@ -65,6 +69,7 @@ export class MockStitchClient implements StitchClient {
   private readonly jobs = new Map<string, MockStitchRecord>();
 
   async submit(prompt: string): Promise<StitchSubmission> {
+    // mock 模式下只记录 prompt，不会真的请求 Stitch。
     const stitchJobId = `stitch-${randomUUID()}`;
     this.jobs.set(stitchJobId, { prompt, polls: 0 });
     return { stitchJobId, runtime: "mock" };
@@ -116,8 +121,8 @@ export class MockStitchClient implements StitchClient {
       "</html>",
     ].join("\n");
 
-    // The mock client keeps the same artifact shape as the real client so the
-    // rest of the workflow can switch between both modes without branching.
+    // mock 产物格式尽量和真实 Stitch 保持一致，
+    // 这样 orchestrator 就不用区分两套流程。
     await writeFile(htmlPath, mockHtml, "utf8");
     await writeFile(imagePath, ONE_PIXEL_PNG);
     await writeFile(
@@ -150,6 +155,7 @@ export class RealStitchClient implements StitchClient {
   private readonly jobs = new Map<string, RealStitchRecord>();
 
   constructor(private readonly options: RealStitchClientOptions) {
+    // 这里通过官方 Stitch SDK 创建真实客户端。
     const client = new StitchToolClient({
       apiKey: options.apiKey,
       accessToken: options.accessToken,
@@ -162,6 +168,7 @@ export class RealStitchClient implements StitchClient {
   }
 
   async submit(prompt: string): Promise<StitchSubmission> {
+    // 真实模式下，submit 会真正去创建项目/生成 screen。
     const stitchJobId = `stitch-${randomUUID()}`;
     this.jobs.set(stitchJobId, { prompt, status: "queued" });
 
@@ -201,6 +208,8 @@ export class RealStitchClient implements StitchClient {
   }
 
   async getStatus(stitchJobId: string): Promise<StitchJobStatus> {
+    // 真实模式下，这里直接读取本地缓存的状态；
+    // 当前 demo 把 submit 设计成同步完成生成，所以状态转换已经在 submit 里发生。
     return this.requireJob(stitchJobId).status;
   }
 
@@ -245,12 +254,11 @@ export class RealStitchClient implements StitchClient {
   }
 
   private async resolveProject(prompt: string) {
+    // 如果配置了 projectId，就复用它；否则为当前需求创建一个新项目。
     if (this.options.projectId) {
       return this.sdk.project(this.options.projectId);
     }
 
-    // Each generated requirement can create an isolated Stitch project unless
-    // the caller explicitly chooses to reuse a known project ID.
     return this.sdk.createProject(deriveProjectTitle(prompt));
   }
 
@@ -264,6 +272,8 @@ export class RealStitchClient implements StitchClient {
   }
 }
 
+// FallbackStitchClient 负责“真实 Stitch 优先，失败就降级到 mock”。
+// 这样即使网络、权限或外部服务暂时不可用，主流程也仍然能继续演示。
 export class FallbackStitchClient implements StitchClient {
   private readonly fallbackReasons = new Map<string, string>();
 
@@ -273,6 +283,7 @@ export class FallbackStitchClient implements StitchClient {
   ) {}
 
   async submit(prompt: string): Promise<StitchSubmission> {
+    // 优先尝试真实 Stitch；失败时自动降级为 mock，保证主流程不中断。
     try {
       return await this.primary.submit(prompt);
     } catch (error) {
@@ -314,10 +325,14 @@ export class FallbackStitchClient implements StitchClient {
 }
 
 export function createStitchClientFromEnv(): StitchClient {
+  // 这里是 Stitch 客户端的统一工厂：
+  // 有真实凭证就走“真实 + fallback”，没有就直接走 mock。
   const env = readStitchRuntimeEnv();
 
   if (hasRealStitchCredentials(env)) {
-    const proxy = configureNodeHttpProxy();
+    // 真实 Stitch 需要先把 Node 代理配置好，
+    // 否则在某些环境里即使系统代理可用，SDK 也可能直连超时。
+    configureNodeHttpProxy();
 
     return new FallbackStitchClient(
       new RealStitchClient({
@@ -337,12 +352,14 @@ export function createStitchClientFromEnv(): StitchClient {
   return new MockStitchClient();
 }
 
+// 给 metadata 追加降级说明，方便后面排查为什么这次不是走的真实 Stitch。
 async function appendNoteToMetadata(metadataPath: string, note: string): Promise<void> {
   const payload = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
   payload.note = note;
   await writeFile(metadataPath, JSON.stringify(payload, null, 2), "utf8");
 }
 
+// 从 Stitch 返回的下载链接里把文件真正拉到本地目录。
 async function downloadUrlToDirectory(
   url: string,
   targetDir: string,
@@ -361,6 +378,7 @@ async function downloadUrlToDirectory(
   return finalPath;
 }
 
+// 尝试根据响应头或 URL 猜测文件后缀，避免保存成错误扩展名。
 function extensionFromResponse(url: string, contentType: string | null): string | undefined {
   if (contentType?.includes("text/html")) {
     return ".html";
@@ -383,6 +401,7 @@ function extensionFromResponse(url: string, contentType: string | null): string 
   return extension || undefined;
 }
 
+// 用 prompt 的第一行生成一个项目标题。
 function deriveProjectTitle(prompt: string): string {
   const title = prompt
     .split(/\r?\n/)
@@ -392,10 +411,12 @@ function deriveProjectTitle(prompt: string): string {
   return title ? title.slice(0, 80) : `UI-SE ${new Date().toISOString().slice(0, 10)}`;
 }
 
+// 清理文件名，避免非法字符写进本地路径。
 function sanitizeArtifactName(value: string): string {
   return value.replace(/[^a-zA-Z0-9-_]+/g, "-");
 }
 
+// 把未知异常转成更适合写日志的文本。
 function formatError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -404,6 +425,7 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+// mock 模式下的截图占位图，保证生成出来的文件真的是 PNG。
 const ONE_PIXEL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6HprQAAAAASUVORK5CYII=",
   "base64",

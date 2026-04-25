@@ -4,6 +4,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec, ProductRequirement } from "../types/domain.js";
 
+// spec-agent 负责把一段原始需求整理成结构化 spec。
 export interface DraftSpecInput {
   rawRequirement: string;
 }
@@ -20,6 +21,7 @@ export class SpecAgent implements Agent<DraftSpecInput, DraftSpecOutput> {
   async run({
     rawRequirement,
   }: DraftSpecInput): Promise<AgentResult<DraftSpecOutput>> {
+    // 先从文本里提取功能点，后续开发和测试都会围绕这些 feature 运行。
     const features = extractFeatureNames(rawRequirement).map((name, index) =>
       createFeature(name, index),
     );
@@ -62,6 +64,7 @@ export class SpecAgent implements Agent<DraftSpecInput, DraftSpecOutput> {
   }
 }
 
+// 尝试从需求第一行里提取一个标题。
 function inferTitle(rawRequirement: string): string {
   const firstLine = rawRequirement
     .split(/\r?\n/)
@@ -75,11 +78,13 @@ function inferTitle(rawRequirement: string): string {
   return firstLine.replace(/^[*-]\s*/, "").slice(0, 80);
 }
 
+// 生成简短摘要，后面会给 UI 生成和日志展示使用。
 function summarizeRequirement(rawRequirement: string): string {
   const normalized = rawRequirement.replace(/\s+/g, " ").trim();
   return normalized.slice(0, 180);
 }
 
+// 优先从项目符号中提取功能点；没有项目符号时给一个兜底结果。
 function extractFeatureNames(rawRequirement: string): string[] {
   const bulletLines = rawRequirement
     .split(/\r?\n/)
@@ -99,6 +104,7 @@ function extractFeatureNames(rawRequirement: string): string[] {
   ];
 }
 
+// 初始化单个 feature 的基础状态。
 function createFeature(name: string, index: number): FeatureSpec {
   return {
     id: `feature-${index + 1}`,

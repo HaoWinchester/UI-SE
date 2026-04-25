@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { ProductRequirement } from "../types/domain.js";
 
+// ui-agent 的职责是整理 prompt，而不是自己直接操作 Stitch 网站。
 export interface UiAgentInput {
   requirement: ProductRequirement;
 }
@@ -16,6 +17,7 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
   readonly definition = agentRegistry["ui-agent"];
 
   async run({ requirement }: UiAgentInput): Promise<AgentResult<UiAgentOutput>> {
+    // 把 feature 和验收标准整理成一段更适合 UI 生成工具理解的描述。
     const featureList = requirement.features
       .map((feature, index) => `${index + 1}. ${feature.name}`)
       .join("\n");

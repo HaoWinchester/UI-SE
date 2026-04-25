@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { FeatureSpec } from "../types/domain.js";
 
+// dev-agent 负责“怎么实现功能点”的判断。
 export interface DevAgentInput {
   feature: FeatureSpec;
   uiArtifactPath: string;
@@ -16,6 +17,7 @@ export class DevAgent implements Agent<DevAgentInput, DevAgentOutput> {
   readonly definition = agentRegistry["dev-agent"];
 
   async run({ feature, uiArtifactPath }: DevAgentInput): Promise<AgentResult<DevAgentOutput>> {
+    // 当前版本先返回一个实现计划，后面接入真实模型后可以扩展成真实开发建议。
     const implementationPlan = [
       `Review the feature acceptance criteria for "${feature.name}".`,
       "Map frontend and backend work for the current feature slice.",

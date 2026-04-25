@@ -1,3 +1,5 @@
+// 下面这些类型定义的是整个工作流里的核心数据结构。
+// 你可以把它理解成“这个系统内部状态的数据字典”。
 export type JobStage =
   | "drafting_spec"
   | "spec_confirmed"
@@ -25,6 +27,7 @@ export type BugStatus = "open" | "fixed";
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
+// 单个功能点的定义。
 export interface FeatureSpec {
   id: string;
   name: string;
@@ -35,6 +38,7 @@ export interface FeatureSpec {
   testAttempts: number;
 }
 
+// 一份结构化需求，会被拆成多个 feature。
 export interface ProductRequirement {
   id: string;
   title: string;
@@ -44,6 +48,7 @@ export interface ProductRequirement {
   features: FeatureSpec[];
 }
 
+// Stitch 生成出来的 UI 产物信息。
 export interface UiArtifact {
   stitchJobId: string;
   projectId?: string;
@@ -57,6 +62,7 @@ export interface UiArtifact {
   status: "ready" | "failed";
 }
 
+// 测试失败后生成的 bug 记录。
 export interface BugReport {
   id: string;
   featureId: string;
@@ -66,6 +72,7 @@ export interface BugReport {
   status: BugStatus;
 }
 
+// 一次测试执行的结果。
 export interface TestRun {
   id: string;
   scope: TestScope;
@@ -76,6 +83,7 @@ export interface TestRun {
   createdAt: string;
 }
 
+// 一次部署记录。
 export interface DeploymentRecord {
   environment: string;
   status: "deployed" | "failed";
@@ -83,12 +91,14 @@ export interface DeploymentRecord {
   createdAt: string;
 }
 
+// 工作流里的普通事件日志。
 export interface JobEvent {
   stage: JobStage;
   message: string;
   createdAt: string;
 }
 
+// 一次 agent 执行的记录，方便排查问题。
 export interface AgentRunRecord {
   agentName: string;
   stage: JobStage;
@@ -108,6 +118,7 @@ export interface AgentRunRecord {
   createdAt: string;
 }
 
+// 整个任务对象，是 orchestrator 操作的核心状态载体。
 export interface WorkflowJob {
   id: string;
   requirement: ProductRequirement;

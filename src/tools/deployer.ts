@@ -3,6 +3,8 @@ import path from "node:path";
 
 import type { DeploymentRecord, WorkflowJob } from "../types/domain.js";
 
+// Deployer 是发布层抽象。
+// 当前版本只是生成一份部署清单，不会真的推到服务器。
 export interface Deployer {
   deploy(job: WorkflowJob, environment: string): Promise<DeploymentRecord>;
 }
@@ -11,6 +13,7 @@ export class MockDeployer implements Deployer {
   constructor(private readonly baseDir: string) {}
 
   async deploy(job: WorkflowJob, environment: string): Promise<DeploymentRecord> {
+    // 把本次发布的关键信息写成 JSON，方便后续追踪和调试。
     const artifactDir = path.join(this.baseDir, "artifacts", "build");
     await mkdir(artifactDir, { recursive: true });
 

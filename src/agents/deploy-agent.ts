@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { WorkflowJob } from "../types/domain.js";
 
+// deploy-agent 负责发布前最后一层判断：当前版本是否允许部署。
 export interface DeployAgentInput {
   job: WorkflowJob;
 }

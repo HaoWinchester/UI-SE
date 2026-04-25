@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+// 这里统一读取 .env 和进程环境变量，避免配置逻辑散落在各处。
 const DEFAULT_STITCH_TIMEOUT_MS = 300_000;
 
 export type StitchDeviceType =
@@ -26,11 +27,13 @@ export interface StitchRuntimeEnv {
   modelId?: StitchModelId;
 }
 
+// 读取可选环境变量；如果没配置，就返回 undefined。
 function readOptional(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value ? value : undefined;
 }
 
+// 读取数字配置，并在非法时回退到默认值。
 function readNumber(name: string, fallback: number): number {
   const raw = readOptional(name);
   if (!raw) {
@@ -41,12 +44,14 @@ function readNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// 读取 Stitch 的设备类型，例如 DESKTOP / MOBILE。
 function readDeviceType(): StitchDeviceType {
   const value = readOptional("STITCH_DEVICE_TYPE");
   const allowed: StitchDeviceType[] = ["DEVICE_TYPE_UNSPECIFIED", "MOBILE", "DESKTOP", "TABLET", "AGNOSTIC"];
   return allowed.includes(value as StitchDeviceType) ? (value as StitchDeviceType) : "DESKTOP";
 }
 
+// 读取 Stitch 的模型类型。
 function readModelId(): StitchModelId | undefined {
   const value = readOptional("STITCH_MODEL_ID");
   const allowed: StitchModelId[] = [
@@ -59,6 +64,7 @@ function readModelId(): StitchModelId | undefined {
   return allowed.includes(value as StitchModelId) ? (value as StitchModelId) : undefined;
 }
 
+// 把和 Stitch 相关的配置统一组装成一个对象。
 export function readStitchRuntimeEnv(): StitchRuntimeEnv {
   return {
     apiKey: readOptional("STITCH_API_KEY"),
@@ -72,6 +78,7 @@ export function readStitchRuntimeEnv(): StitchRuntimeEnv {
   };
 }
 
+// 只要配置了 API Key，或者配置了 OAuth 所需参数，就认为可以尝试走真实 Stitch。
 export function hasRealStitchCredentials(env: StitchRuntimeEnv): boolean {
   const hasApiKey = Boolean(env.apiKey);
   const hasOAuth = Boolean(env.accessToken && env.googleCloudProject);

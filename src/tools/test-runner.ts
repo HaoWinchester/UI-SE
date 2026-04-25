@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { BugReport, FeatureSpec, TestRun, WorkflowJob } from "../types/domain.js";
 
+// TestRunner 是测试执行层的抽象。
+// 现在是 mock，后面可以替换成真正的单测、集成测试或 E2E。
 export interface TestRunner {
   runFeatureTests(feature: FeatureSpec): Promise<TestRun>;
   runFlowTests(features: FeatureSpec[]): Promise<TestRun>;
@@ -12,6 +14,8 @@ export class MockTestRunner implements TestRunner {
   private readonly attempts = new Map<string, number>();
 
   async runFeatureTests(feature: FeatureSpec): Promise<TestRun> {
+    // 这里故意让第一次 feature 测试失败，
+    // 这样就能把 repair loop 的流程完整演示出来。
     const attempt = (this.attempts.get(feature.id) ?? 0) + 1;
     this.attempts.set(feature.id, attempt);
 
@@ -49,6 +53,7 @@ export class MockTestRunner implements TestRunner {
   }
 
   async runFlowTests(features: FeatureSpec[]): Promise<TestRun> {
+    // flow test 关注的是“多个功能点拼起来后的整体流程”。
     const unfinished = features.filter((feature) => feature.status !== "done");
 
     return {
@@ -65,6 +70,7 @@ export class MockTestRunner implements TestRunner {
   }
 
   async runAcceptanceTests(job: WorkflowJob): Promise<TestRun> {
+    // acceptance test 是发布前的最后检查。
     const openBugs = job.bugReports.filter((bug) => bug.status === "open");
 
     return {

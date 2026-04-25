@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 
 import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 
+// 这个文件专门解决“Node 进程怎么走代理”的问题。
+// 浏览器能走系统代理，不代表 Node 里的 fetch 也会自动走。
 export interface ProxyConfigurationResult {
   configured: boolean;
   source: "env" | "system" | "none";
@@ -12,6 +14,8 @@ export interface ProxyConfigurationResult {
 
 let cachedResult: ProxyConfigurationResult | undefined;
 
+// 给整个 Node 进程绑定代理。
+// 顺序是：显式环境变量 -> macOS 系统代理 -> 不配置代理。
 export function configureNodeHttpProxy(): ProxyConfigurationResult {
   if (cachedResult) {
     return cachedResult;
@@ -50,6 +54,7 @@ export function configureNodeHttpProxy(): ProxyConfigurationResult {
   return cachedResult;
 }
 
+// 优先读取显式代理配置，适合在服务器或手工调试时使用。
 function readExplicitProxyConfiguration():
   | {
       httpProxy?: string;
@@ -73,6 +78,7 @@ function readExplicitProxyConfiguration():
   };
 }
 
+// 在 macOS 下尝试自动读取系统代理。
 function detectMacOsSystemProxy():
   | {
       httpProxy?: string;
@@ -117,6 +123,7 @@ function detectMacOsSystemProxy():
   }
 }
 
+// 真正把代理信息写进环境变量，并绑定到 undici 的全局 dispatcher。
 function applyProxyEnvironment(config: {
   httpProxy?: string;
   httpsProxy?: string;
@@ -137,11 +144,12 @@ function applyProxyEnvironment(config: {
     process.env.no_proxy = config.noProxy;
   }
 
-  // undici does not pick up the macOS system proxy automatically in our runtime,
-  // so we bind an environment-aware dispatcher explicitly for all fetch calls.
+  // 当前运行环境里，undici 不会自动吃到系统代理，
+  // 所以这里显式设置一遍，保证后续 fetch 都走代理。
   setGlobalDispatcher(new EnvHttpProxyAgent());
 }
 
+// 把 `scutil --proxy` 的文本输出解析成 JS 对象。
 function parseScutilProxyOutput(output: string): Record<string, string | string[]> {
   const result: Record<string, string | string[]> = {};
   const lines = output.split(/\r?\n/);
@@ -191,6 +199,7 @@ function parseScutilProxyOutput(output: string): Record<string, string | string[
   return result;
 }
 
+// 小工具函数：读取一个环境变量。
 function readOptionalEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value ? value : undefined;

@@ -2,6 +2,7 @@ import type { Agent, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
 import type { WorkflowJob } from "../types/domain.js";
 
+// monitor-agent 用来检查“实现是否偏离了原始需求”。
 export interface MonitorAgentInput {
   job: WorkflowJob;
 }

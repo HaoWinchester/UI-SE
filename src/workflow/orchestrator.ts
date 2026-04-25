@@ -26,6 +26,8 @@ import type {
 } from "../types/domain.js";
 import { assertPathsWithinScopes } from "./workspace-policy.js";
 
+// 这里把 orchestrator 依赖的所有组件集中列出来，
+// 方便后面替换真实存储、真实测试器、真实部署器。
 interface OrchestratorDependencies {
   store: JobStore;
   specAgent: SpecAgent;
@@ -41,10 +43,13 @@ interface OrchestratorDependencies {
   baseDir: string;
 }
 
+// DeliveryOrchestrator 是整套系统的总调度器。
+// 它本身不负责“思考”每个业务细节，而是负责按阶段调用 agent 和工具。
 export class DeliveryOrchestrator {
   constructor(private readonly deps: OrchestratorDependencies) {}
 
   async createJob(rawRequirement: string): Promise<WorkflowJob> {
+    // 新任务创建时，先让 spec-agent 把自然语言需求整理成结构化 requirement。
     const jobId = randomUUID();
     const specExecution = await this.prepareAgentRun(
       jobId,
@@ -77,6 +82,7 @@ export class DeliveryOrchestrator {
   }
 
   async run(jobId: string): Promise<WorkflowJob> {
+    // 这是主流程入口：从 spec 确认一路推进到 UI 生成、开发、测试、验收和部署。
     await this.transition(jobId, "spec_confirmed", "Spec confirmed and ready for UI generation.");
 
     let job = await this.deps.store.get(jobId);
@@ -108,6 +114,7 @@ export class DeliveryOrchestrator {
     );
 
     job = await this.deps.store.get(jobId);
+    // 每个功能点按顺序进入“开发 -> 测试 -> 必要时修复 -> 再测试”的循环。
     for (const feature of job.requirement.features) {
       const result = await this.developFeature(jobId, feature.id);
       if (result.stage === "blocked") {
@@ -176,6 +183,7 @@ export class DeliveryOrchestrator {
   }
 
   private async developFeature(jobId: string, featureId: string): Promise<WorkflowJob> {
+    // 这里封装了单个功能点的完整生命周期，避免主流程被大量细节淹没。
     let job = await this.deps.store.get(jobId);
     const feature = this.requireFeature(job, featureId);
 
@@ -274,8 +282,8 @@ export class DeliveryOrchestrator {
     runtime: "real" | "mock";
     note?: string;
   }): Promise<UiArtifact> {
-    // Browser automation and polling remain deterministic tool work. The agent
-    // only decides when the workflow should call this tool and how to use the result.
+    // 轮询、下载这类动作仍然属于确定性的工具层工作。
+    // agent 只负责决定“什么时候调用它”和“结果如何进入下一步”。
     for (let poll = 0; poll < 5; poll += 1) {
       const status = await this.deps.stitchClient.getStatus(submission.stitchJobId);
       if (status === "completed") {
@@ -317,11 +325,12 @@ export class DeliveryOrchestrator {
     agent: Agent<Input, Output>,
     input: Input,
   ): Promise<{ context: AgentExecutionContext; result: AgentResult<Output>; record: AgentRunRecord }> {
+    // 每次执行 agent 前，先组装上下文，再真正调用 agent。
     const context = createExecutionContext(agent.definition, jobId, stage, this.deps.baseDir);
     const result = await agent.run(input, context);
 
-    // Prompt instructions alone are too weak for file safety. The orchestrator
-    // validates the agent's declared write set against the configured scopes here.
+    // 仅靠 prompt 约束文件权限是不够的，
+    // 所以 orchestrator 会在这里强制校验 agent 返回的改动范围。
     assertPathsWithinScopes(result.changedFiles, context.writeScopes);
 
     return {
@@ -337,6 +346,8 @@ export class DeliveryOrchestrator {
     agent: Agent<Input, Output>,
     input: Input,
   ): Promise<AgentResult<Output>> {
+    // executeAgent 会顺带把运行记录和事件日志写回 store，
+    // 这样后面排查流程时可以看到每一步是谁做的、做了什么判断。
     const execution = await this.prepareAgentRun(jobId, stage, agent, input);
 
     await this.deps.store.update(jobId, (current) => ({
@@ -356,6 +367,7 @@ export class DeliveryOrchestrator {
   }
 
   private async transition(jobId: string, stage: JobStage, message: string): Promise<void> {
+    // 所有阶段切换统一走这里，方便保证 stage 和事件日志始终同步。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       stage,
@@ -371,6 +383,8 @@ export class DeliveryOrchestrator {
   }
 
   private async recordTest(jobId: string, testRun: TestRun): Promise<void> {
+    // 测试结果写回后，不只是追加 testRuns，
+    // 还会同步更新 bug 列表和对应 feature 的 testAttempts。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       bugReports: mergeBugReports(current.bugReports, testRun.bugs),
@@ -405,6 +419,7 @@ export class DeliveryOrchestrator {
     featureId: string,
     updater: (feature: FeatureSpec) => FeatureSpec,
   ): Promise<void> {
+    // 统一通过 updater 修改 feature，能减少重复的对象拷贝逻辑。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       requirement: {
@@ -417,6 +432,7 @@ export class DeliveryOrchestrator {
   }
 
   private async markFeatureBugsFixed(jobId: string, featureId: string): Promise<void> {
+    // 当功能点最终通过时，把该功能相关的历史 bug 一并标记为 fixed。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       bugReports: current.bugReports.map((bug) =>
@@ -426,11 +442,14 @@ export class DeliveryOrchestrator {
   }
 
   private async blockJob(jobId: string, reason: string): Promise<WorkflowJob> {
+    // 任意关键步骤失败后，都统一走 blocked 收口，避免流程继续向后推进。
     await this.transition(jobId, "blocked", reason);
     return this.deps.store.get(jobId);
   }
 
   private requireFeature(job: WorkflowJob, featureId: string): FeatureSpec {
+    // 这个小工具函数的目的是把“找不到 feature”变成明确异常，
+    // 避免后续代码在 undefined 上继续运行。
     const feature = job.requirement.features.find((item) => item.id === featureId);
     if (!feature) {
       throw new Error(`Feature not found: ${featureId}`);
@@ -440,6 +459,7 @@ export class DeliveryOrchestrator {
   }
 }
 
+// 把一次 agent 运行转换成结构化记录，后面会落进 job.agentRuns。
 function buildAgentRunRecord<Input, Output>(
   definition: AgentDefinition,
   context: AgentExecutionContext,
@@ -465,10 +485,12 @@ function buildAgentRunRecord<Input, Output>(
   };
 }
 
+// 把 agent 运行记录拼成一条简短日志，便于在 events 里浏览。
 function formatAgentEvent(record: AgentRunRecord): string {
   return `${record.agentName}: ${record.summary} Next: ${record.nextAction}.`;
 }
 
+// 合并测试带回来的 bug，避免同一个 bug id 被重复插入。
 function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugReport[] {
   const known = new Map(existing.map((bug) => [bug.id, bug]));
   for (const bug of incoming) {
@@ -478,6 +500,7 @@ function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugRepor
   return [...known.values()];
 }
 
+// 创建一套默认依赖，方便 index.ts 直接启动一个可运行的 demo。
 export function createDefaultOrchestrator(baseDir: string): DeliveryOrchestrator {
   return new DeliveryOrchestrator({
     store: new InMemoryJobStore(),

@@ -1,7 +1,7 @@
 import type { AgentDefinition, AgentName } from "./base.js";
 
-// The registry keeps agent policy in one place so the orchestrator can enforce
-// roles, model profiles, tool access, and folder scopes consistently.
+// 这个注册表就是 agent 的“配置中心”。
+// orchestrator 会从这里读取每个角色的模型、权限、可访问目录和工具权限。
 export const agentRegistry: Record<AgentName, AgentDefinition> = {
   "spec-agent": {
     name: "spec-agent",
