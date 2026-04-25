@@ -33,7 +33,28 @@ npm run dev
 
 If `STITCH_API_KEY` or OAuth credentials are configured in `.env`, the workflow uses the real Stitch SDK. Otherwise it automatically falls back to the mock Stitch client so the rest of the flow still runs locally.
 
-The demo entrypoint creates a sample requirement, runs it through the orchestration flow, and writes UI artifacts under `artifacts/`.
+The demo entrypoint now reads the requirement from `requirement.md` by default, runs it through the orchestration flow, and writes UI artifacts under `artifacts/`.
+
+## Requirement input
+
+Use one of these ways to submit a requirement:
+
+```bash
+# Recommended for demos: edit the project-root requirement.md, then run
+npm run dev
+
+# Or point to a different markdown file
+npm run dev -- --file ./requirement.md
+
+# Show CLI help
+npm run dev -- --help
+```
+
+Input priority:
+
+1. `--file path/to/requirement.md`
+2. project-root `requirement.md`
+3. built-in fallback demo requirement
 
 ## Stitch setup
 
