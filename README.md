@@ -1,29 +1,29 @@
 # UI-SE
 
-`UI-SE` is a bootstrap scaffold for an agent-orchestrated delivery system:
+`UI-SE` 是一个“智能体编排式交付系统”的初版骨架，当前目标是把下面这条链路先跑通：
 
-1. turn a requirement into a working spec
-2. send the approved spec to Stitch for UI generation
-3. implement features one by one
-4. test each feature, fix failures, and re-test
-5. validate the final build against the requirement
-6. deploy the accepted build
+1. 接收一句话需求或需求文件
+2. 先把需求整理成结构化 spec
+3. 将澄清后的 spec 发送给 Stitch 生成 UI
+4. 按功能点进入开发、测试、修复循环
+5. 检查最终结果是否仍与原始需求一致
+6. 通过后进入部署阶段
 
-The current codebase intentionally starts with mock integrations so the full workflow can run end to end before you plug in real LLMs, browser automation, CI, and deployment targets.
+当前仓库仍然是演示版骨架，所以有些节点是真实集成，有些节点还是 mock。这样做的目的是先把整条工作流跑通，再逐步替换成真实模型、真实测试和真实部署。
 
-## What is in this repo
+## 仓库结构
 
-- `docs/architecture.md`: system design and rollout plan
-- `docs/agent-runtime.md`: agent model profiles, folder scopes, and tool permissions
-- `docs/roadmap.md`: version-by-version delivery plan for iterative implementation
-- `src/workflow`: orchestration and state transitions
-- `src/agents`: agent role contracts and default implementations
-- `src/tools`: deterministic tools such as Stitch, testing, and deployment clients
-- `src/storage`: job persistence abstraction with an in-memory implementation
-- `skills`: early `SKILL.md` files for each agent role
-- `artifacts`: generated specs, UI files, test reports, and build outputs
+- `docs/architecture.md`：系统架构和演进路线
+- `docs/agent-runtime.md`：agent 的模型画像、目录权限、工具权限
+- `docs/roadmap.md`：按版本推进的开发计划
+- `src/workflow`：工作流编排与状态流转
+- `src/agents`：各个 agent 的角色定义与默认实现
+- `src/tools`：Stitch、测试、部署等确定性工具层
+- `src/storage`：任务存储抽象，目前是内存实现
+- `skills`：每个 agent 对应的早期 `SKILL.md`
+- `artifacts`：生成的 spec、UI、测试结果、部署清单等产物
 
-## Quick start
+## 快速开始
 
 ```bash
 npm install
@@ -31,87 +31,125 @@ cp .env.example .env
 npm run dev
 ```
 
-If `STITCH_API_KEY` or OAuth credentials are configured in `.env`, the workflow uses the real Stitch SDK. Otherwise it automatically falls back to the mock Stitch client so the rest of the flow still runs locally.
+如果你在 `.env` 中配置了 `STITCH_API_KEY` 或 OAuth 相关凭证，流程会优先走真实 Stitch SDK；如果没有配置，则会自动降级到 mock Stitch，但整个流程依然可以本地跑通。
 
-The demo entrypoint now supports a one-line prompt, auto-clarifies it into a Speckit-style spec, then sends that clarified spec into the UI orchestration flow and writes outputs under `artifacts/`.
+## 需求输入方式
 
-## Requirement input
-
-Use one of these ways to submit a requirement:
+当前支持 3 种输入方式，推荐直接传一句话，最方便演示。
 
 ```bash
-# Fastest demo path: pass one sentence directly
-npm run dev -- --prompt "Build a project delivery dashboard for an AI team"
+# 方式一：直接传一句话需求（最适合演示）
+npm run dev -- --prompt "为 AI 产品团队做一个项目交付看板"
 
-# Or use a positional sentence
-npm run dev -- "Build a project delivery dashboard for an AI team"
+# 方式二：直接把一句话作为位置参数传入
+npm run dev -- "为 AI 产品团队做一个项目交付看板"
 
-# Or edit the project-root requirement.md, then run
+# 方式三：使用项目根目录下的 requirement.md
 npm run dev
 
-# Or point to a different markdown file
+# 指定一个自定义需求文件
 npm run dev -- --file ./requirement.md
 
-# Show CLI help
+# 查看帮助
 npm run dev -- --help
 ```
 
-Input priority:
+输入优先级如下：
 
-1. inline prompt (`--prompt "..."` or positional sentence)
-2. `--file path/to/requirement.md`
-3. project-root `requirement.md`
-4. built-in fallback demo requirement
+1. 命令行直接传入的一句话需求
+2. `--file` 指定的需求文件
+3. 项目根目录下的 `requirement.md`
+4. 代码内置的兜底演示需求
 
-## Speckit-style clarification flow
+## 当前主流程
 
-The first step is no longer "send the raw sentence to Stitch".
+当前最重要的一条链路已经是：
 
-Instead the runtime now does this:
+1. 输入一句话需求
+2. `spec-agent` 先自动澄清需求，生成结构化 spec
+3. 将这份 spec 落到 `artifacts/specs`
+4. `ui-agent` 基于澄清后的 spec 组织 Stitch prompt
+5. `stitch-client` 调用 Stitch 生成并下载 UI 到 `artifacts/ui`
 
-1. accept a one-line requirement or markdown requirement file
-2. run `spec-agent` to turn it into a clarified, structured spec
-3. persist that clarified spec to `artifacts/specs`
-4. use the clarified spec as the grounding input for `ui-agent`
-5. send the resulting prompt to Stitch
+也就是说，现在已经不是“把原始一句话直接发给 Stitch”，而是：
 
-This makes the UI generation step more stable because Stitch receives a clearer specification with:
+`一句话需求 -> 澄清 spec -> Stitch 生成 UI`
 
-- clarified scope
-- user scenarios
-- feature slices
-- success criteria
-- explicit assumptions
+这样生成结果会更稳定，因为 Stitch 拿到的是更清晰的输入，而不是一条过于模糊的原始描述。
 
-## Stitch setup
+## Speckit 风格澄清
 
-For the real Stitch path, configure one of these:
+目前项目里已经接上了“Speckit 风格”的自动澄清思路，虽然还不是完整的交互式追问版本，但已经会在进入 UI 生成前自动补齐以下内容：
+
+- 澄清后的需求摘要
+- 功能切片（feature slices）
+- 用户场景（user scenarios）
+- 成功标准（success criteria）
+- 假设条件（assumptions）
+- 默认澄清项（clarifications）
+
+生成后的 spec 会写到：
+
+- `artifacts/specs`
+
+这份 spec 既能给人看，也会被后续 `ui-agent` 用来组织发给 Stitch 的 prompt。
+
+## Stitch 配置
+
+如果你想走真实 Stitch，需要在 `.env` 中配置下面任意一种方式：
 
 - `STITCH_API_KEY`
-- `STITCH_ACCESS_TOKEN` together with `GOOGLE_CLOUD_PROJECT`
+- `STITCH_ACCESS_TOKEN` + `GOOGLE_CLOUD_PROJECT`
 
-Optional settings:
+可选配置包括：
 
-- `STITCH_PROJECT_ID`: reuse an existing Stitch project instead of creating a new one
-- `STITCH_DEVICE_TYPE`: `DESKTOP`, `MOBILE`, `TABLET`, or `AGNOSTIC`
-- `STITCH_MODEL_ID`: `GEMINI_3_PRO`, `GEMINI_3_FLASH`, or `GEMINI_3_1_PRO`
-- `STITCH_HOST`: override the default Stitch MCP endpoint
-- `STITCH_PROXY_URL`: force a specific HTTP proxy for Stitch requests
+- `STITCH_PROJECT_ID`：复用某个已有的 Stitch 项目
+- `STITCH_DEVICE_TYPE`：`DESKTOP`、`MOBILE`、`TABLET`、`AGNOSTIC`
+- `STITCH_MODEL_ID`：`GEMINI_3_PRO`、`GEMINI_3_FLASH`、`GEMINI_3_1_PRO`
+- `STITCH_HOST`：自定义 Stitch MCP 地址
+- `STITCH_PROXY_URL`：手动指定 Stitch 请求走哪个代理
 
-## Proxy behavior
+## 代理行为
 
-When real Stitch credentials are present, the runtime now supports proxy routing in this order:
+当启用了真实 Stitch 凭证时，运行时会按下面顺序尝试代理配置：
 
-1. explicit `STITCH_PROXY_URL`
-2. standard `HTTP_PROXY` / `HTTPS_PROXY`
-3. automatic macOS system proxy detection through `scutil --proxy`
+1. `STITCH_PROXY_URL`
+2. 标准环境变量 `HTTP_PROXY` / `HTTPS_PROXY`
+3. macOS 系统代理（通过 `scutil --proxy` 自动探测）
 
-This is important because the Stitch SDK itself does not expose a dedicated proxy option, and the Node runtime in this environment did not automatically honor the system proxy without an explicit `undici` dispatcher.
+这样做是因为 Stitch SDK 本身没有单独的代理参数，而当前 Node 运行环境也不会总是自动继承系统代理，所以这里在代码里显式补了一层代理配置。
 
-## Recommended next steps
+## 当前真实程度
 
-1. Expand Stitch handling with richer project reuse, edit flows, and variants when needed.
-2. Swap the mock agents for real model-backed agents.
-3. Persist jobs in SQLite or Postgres instead of memory.
-4. Connect `MockTestRunner` to your actual test commands and CI signals.
-5. Replace `MockDeployer` with your real staging and production release flow.
+目前这套系统里，已经比较“真实”的部分有：
+
+- 一句话需求输入
+- 需求自动澄清成 spec
+- Stitch SDK 调用与 UI 下载
+- 产物落盘到 `artifacts/`
+
+目前还是演示骨架的部分有：
+
+- `dev-agent`
+- `test-agent`
+- `fix-agent`
+- `monitor-agent`
+- `deploy-agent`
+- `MockTestRunner`
+- `MockDeployer`
+
+也就是说，当前最成熟的链路是：
+
+`需求 -> spec -> Stitch -> 下载 UI`
+
+后面的开发、测试、修复、部署虽然流程已经串起来了，但很多仍然是 mock 逻辑。
+
+## 推荐下一步
+
+如果你准备继续往下做，最值得优先推进的是：
+
+1. 把 `spec-agent` 从“自动澄清”升级成“可交互追问”的 clarify loop
+2. 把 `MockTestRunner` 换成你的真实测试命令
+3. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
+4. 把 job 存储从内存换成 SQLite 或 Postgres
+5. 逐步把各个 agent 从 mock 提示逻辑换成真实模型调用
