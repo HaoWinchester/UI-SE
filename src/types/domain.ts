@@ -46,7 +46,13 @@ export interface ProductRequirement {
 
 export interface UiArtifact {
   stitchJobId: string;
+  projectId?: string;
+  screenId?: string;
   downloadPath: string;
+  htmlPath?: string;
+  imagePath?: string;
+  metadataPath?: string;
+  runtime: "real" | "mock";
   status: "ready" | "failed";
 }
 

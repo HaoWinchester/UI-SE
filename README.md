@@ -27,14 +27,31 @@ The current codebase intentionally starts with mock integrations so the full wor
 
 ```bash
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-The demo entrypoint creates a sample requirement, runs it through the orchestration flow, and writes mock outputs under `artifacts/`.
+If `STITCH_API_KEY` or OAuth credentials are configured in `.env`, the workflow uses the real Stitch SDK. Otherwise it automatically falls back to the mock Stitch client so the rest of the flow still runs locally.
+
+The demo entrypoint creates a sample requirement, runs it through the orchestration flow, and writes UI artifacts under `artifacts/`.
+
+## Stitch setup
+
+For the real Stitch path, configure one of these:
+
+- `STITCH_API_KEY`
+- `STITCH_ACCESS_TOKEN` together with `GOOGLE_CLOUD_PROJECT`
+
+Optional settings:
+
+- `STITCH_PROJECT_ID`: reuse an existing Stitch project instead of creating a new one
+- `STITCH_DEVICE_TYPE`: `DESKTOP`, `MOBILE`, `TABLET`, or `AGNOSTIC`
+- `STITCH_MODEL_ID`: `GEMINI_3_PRO`, `GEMINI_3_FLASH`, or `GEMINI_3_1_PRO`
+- `STITCH_HOST`: override the default Stitch MCP endpoint
 
 ## Recommended next steps
 
-1. Replace `MockStitchClient` with a real Playwright or API integration for Stitch.
+1. Validate the Stitch SDK flow with real credentials and, only if needed, add Playwright for gaps the SDK does not cover.
 2. Swap the mock agents for real model-backed agents.
 3. Persist jobs in SQLite or Postgres instead of memory.
 4. Connect `MockTestRunner` to your actual test commands and CI signals.

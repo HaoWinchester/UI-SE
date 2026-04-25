@@ -13,7 +13,7 @@ import { TestAgent } from "../agents/test-agent.js";
 import { UiAgent } from "../agents/ui-agent.js";
 import { InMemoryJobStore, type JobStore } from "../storage/job-store.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
-import { MockStitchClient, type StitchClient } from "../tools/stitch-client.js";
+import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
 import { MockTestRunner, type TestRunner } from "../tools/test-runner.js";
 import type {
   AgentRunRecord,
@@ -90,7 +90,7 @@ export class DeliveryOrchestrator {
       `Submitted the approved requirement to Stitch as ${submission.stitchJobId}.`,
     );
 
-    const uiArtifact = await this.waitForUiArtifact(submission.stitchJobId);
+    const uiArtifact = await this.waitForUiArtifact(submission);
     if (uiArtifact.status === "failed") {
       return this.blockJob(jobId, `Stitch job ${submission.stitchJobId} failed before download.`);
     }
@@ -265,34 +265,46 @@ export class DeliveryOrchestrator {
     return this.deps.store.get(jobId);
   }
 
-  private async waitForUiArtifact(stitchJobId: string): Promise<UiArtifact> {
+  private async waitForUiArtifact(submission: {
+    stitchJobId: string;
+    projectId?: string;
+    screenId?: string;
+    runtime: "real" | "mock";
+  }): Promise<UiArtifact> {
     // Browser automation and polling remain deterministic tool work. The agent
     // only decides when the workflow should call this tool and how to use the result.
     for (let poll = 0; poll < 5; poll += 1) {
-      const status = await this.deps.stitchClient.getStatus(stitchJobId);
+      const status = await this.deps.stitchClient.getStatus(submission.stitchJobId);
       if (status === "completed") {
-        const downloadPath = await this.deps.stitchClient.downloadResult(
-          stitchJobId,
+        const download = await this.deps.stitchClient.downloadResult(
+          submission.stitchJobId,
           path.join(this.deps.baseDir, "artifacts", "ui"),
         );
 
         return {
-          stitchJobId,
-          downloadPath,
+          stitchJobId: submission.stitchJobId,
+          projectId: submission.projectId,
+          screenId: submission.screenId,
+          downloadPath: download.downloadPath,
+          htmlPath: download.htmlPath,
+          imagePath: download.imagePath,
+          metadataPath: download.metadataPath,
+          runtime: submission.runtime,
           status: "ready",
         };
       }
 
       if (status === "failed") {
         return {
-          stitchJobId,
+          stitchJobId: submission.stitchJobId,
           downloadPath: "",
+          runtime: submission.runtime,
           status: "failed",
         };
       }
     }
 
-    throw new Error(`Timed out while waiting for Stitch job ${stitchJobId}.`);
+    throw new Error(`Timed out while waiting for Stitch job ${submission.stitchJobId}.`);
   }
 
   private async prepareAgentRun<Input, Output>(
@@ -472,7 +484,7 @@ export function createDefaultOrchestrator(baseDir: string): DeliveryOrchestrator
     fixAgent: new FixAgent(),
     monitorAgent: new MonitorAgent(),
     deployAgent: new DeployAgent(),
-    stitchClient: new MockStitchClient(),
+    stitchClient: createStitchClientFromEnv(),
     testRunner: new MockTestRunner(),
     deployer: new MockDeployer(baseDir),
     baseDir,

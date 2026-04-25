@@ -27,17 +27,20 @@ Verification:
 
 ### v0.2 Real Stitch integration
 
+Status: implemented in code, credentialed verification pending
+
 Scope:
 
-- replace the mock Stitch client with a real browser automation or API-backed client
+- replace the mock Stitch client with a real SDK-backed or browser-backed client
 - support login, submission, polling, and artifact download
 - persist downloaded artifacts in the correct workspace folder
 
 Verification:
 
+- configure Stitch credentials in `.env`
 - submit a sample requirement to Stitch
 - wait for completion
-- download the generated artifact successfully
+- download both the UI screenshot and HTML successfully
 
 ### v0.3 Model-backed agent runtime
 

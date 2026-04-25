@@ -52,7 +52,7 @@ The current scaffold stores those constraints in code so the orchestrator can en
 
 The tool layer owns deterministic actions:
 
-- website automation
+- Stitch SDK calls and, when necessary, website automation
 - file upload and download
 - test execution
 - deployment
@@ -109,7 +109,7 @@ Make one feature flow run end to end with mocks:
 
 Replace mocks with real deterministic integrations:
 
-- Playwright for Stitch
+- Stitch SDK first, Playwright only for uncovered flows
 - real repo tasks for development
 - real unit and end-to-end tests
 - staging deployment

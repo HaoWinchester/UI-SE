@@ -20,7 +20,17 @@ export class MockDeployer implements Deployer {
       environment,
       deployedAt: new Date().toISOString(),
       features: job.requirement.features.map((feature) => feature.name),
-      uiArtifact: job.uiArtifact?.downloadPath ?? null,
+      uiArtifact: job.uiArtifact
+        ? {
+            runtime: job.uiArtifact.runtime,
+            projectId: job.uiArtifact.projectId ?? null,
+            screenId: job.uiArtifact.screenId ?? null,
+            downloadPath: job.uiArtifact.downloadPath,
+            imagePath: job.uiArtifact.imagePath ?? null,
+            htmlPath: job.uiArtifact.htmlPath ?? null,
+            metadataPath: job.uiArtifact.metadataPath ?? null,
+          }
+        : null,
     };
 
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
