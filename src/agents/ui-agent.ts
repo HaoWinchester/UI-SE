@@ -6,6 +6,7 @@ import type { ProductRequirement, SpecArtifact } from "../types/domain.js";
 export interface UiAgentInput {
   requirement: ProductRequirement;
   specArtifact?: SpecArtifact;
+  designFeedback?: string;
 }
 
 export interface UiAgentOutput {
@@ -17,7 +18,11 @@ export interface UiAgentOutput {
 export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
   readonly definition = agentRegistry["ui-agent"];
 
-  async run({ requirement, specArtifact }: UiAgentInput): Promise<AgentResult<UiAgentOutput>> {
+  async run({
+    requirement,
+    specArtifact,
+    designFeedback,
+  }: UiAgentInput): Promise<AgentResult<UiAgentOutput>> {
     // 把澄清后的 spec、feature 和验收标准整理成一段更适合 UI 生成工具理解的描述。
     const featureList = requirement.features
       .map((feature, index) => `${index + 1}. ${feature.name}`)
@@ -44,6 +49,10 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
       "",
       "Use this clarified product spec as the grounding reference:",
       specArtifact?.markdown ?? "(No persisted spec markdown available.)",
+      "",
+      designFeedback
+        ? `Revise the previous UI concept using this customer feedback: ${designFeedback}`
+        : "This is the first UI concept for the clarified requirement.",
       "",
       "Generate an initial UI concept that supports the following features:",
       featureList,

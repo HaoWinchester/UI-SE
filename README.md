@@ -5,9 +5,10 @@
 1. 接收一句话需求或需求文件
 2. 先把需求整理成结构化 spec
 3. 将澄清后的 spec 发送给 Stitch 生成 UI
-4. 按功能点进入开发、测试、修复循环
-5. 检查最终结果是否仍与原始需求一致
-6. 通过后进入部署阶段
+4. 询问用户是否满意当前设计，不满意则继续重生成新版本
+5. 按功能点进入前端、后端、测试、修复循环
+6. 检查最终结果是否仍与原始需求一致
+7. 最终给客户预览，确认后进入部署阶段
 
 当前仓库仍然是演示版骨架，所以有些节点是真实集成，有些节点还是 mock。这样做的目的是先把整条工作流跑通，再逐步替换成真实模型、真实测试和真实部署。
 
@@ -53,8 +54,8 @@ npm run dev -- --file ./requirement.md
 # 查看帮助
 npm run dev -- --help
 
-# 仅运行流程，不自动打开预览
-npm run dev -- --no-open
+# 自动通过 UI 确认和最终发布确认（适合演示脚本或自动化验证）
+npm run dev -- --yes --no-open
 ```
 
 输入优先级如下：
@@ -65,6 +66,7 @@ npm run dev -- --no-open
 4. 代码内置的兜底演示需求
 
 默认情况下，生成完成后会自动打开 HTML 预览；如果你不想自动弹出预览，可以加 `--no-open`。
+如果你不想在终端里逐次回答“是否满意当前设计”“是否允许发布”，可以加 `--yes` 自动通过确认节点。
 
 ## 当前主流程
 
@@ -74,7 +76,10 @@ npm run dev -- --no-open
 2. `spec-agent` 先自动澄清需求，生成结构化 spec
 3. 将这份 spec 落到 `artifacts/specs`
 4. `ui-agent` 基于澄清后的 spec 组织 Stitch prompt
-5. `stitch-client` 调用 Stitch 生成并下载 UI 到 `artifacts/ui`
+5. `stitch-client` 调用 Stitch 生成并下载 UI 到 `artifacts/ui/<jobId>/v<版本号>/`
+6. 询问是否满意当前 UI，不满意则带着反馈重新生成下一版
+7. 满意后再进入 `frontend-agent -> backend-agent -> test-agent -> fix-agent`
+8. 最终通过 `monitor-agent -> acceptance-agent -> deploy-agent`
 
 也就是说，现在已经不是“把原始一句话直接发给 Stitch”，而是：
 
@@ -90,6 +95,28 @@ npm run dev -- --no-open
 - 正在执行 `ui-agent`
 - 正在等待 Stitch 生成 UI
 - UI 下载完成
+- 正在等待你确认是否满意当前设计
+- 正在等待你确认是否允许发布
+
+## UI 版本管理
+
+每一次 UI 生成结果都会保存到单独目录，不会覆盖上一版：
+
+- `artifacts/ui/<jobId>/v1`
+- `artifacts/ui/<jobId>/v2`
+- `artifacts/ui/<jobId>/v3`
+
+每个版本目录里都会保存：
+
+- 图片
+- HTML
+- metadata
+
+系统会记录：
+
+- 当前是第几版
+- 哪一版最终被批准
+- 每次被拒绝时留下的反馈
 
 ## Speckit 风格澄清
 
@@ -139,22 +166,27 @@ npm run dev -- --no-open
 
 - 一句话需求输入
 - 需求自动澄清成 spec
+- UI 多版本生成与保存
+- UI 满意度确认后再继续开发
 - Stitch SDK 调用与 UI 下载
+- 最终发布前客户确认
 - 产物落盘到 `artifacts/`
 
 目前还是演示骨架的部分有：
 
-- `dev-agent`
+- `frontend-agent`
+- `backend-agent`
 - `test-agent`
 - `fix-agent`
 - `monitor-agent`
+- `acceptance-agent`
 - `deploy-agent`
 - `MockTestRunner`
 - `MockDeployer`
 
 也就是说，当前最成熟的链路是：
 
-`需求 -> spec -> Stitch -> 下载 UI`
+`需求 -> spec -> Stitch -> UI 确认 -> 前后端开发骨架 -> 测试/修复 -> 客户确认 -> 部署`
 
 后面的开发、测试、修复、部署虽然流程已经串起来了，但很多仍然是 mock 逻辑。
 

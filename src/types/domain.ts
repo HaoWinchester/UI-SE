@@ -5,12 +5,14 @@ export type JobStage =
   | "spec_confirmed"
   | "ui_generating"
   | "ui_ready"
+  | "reviewing_ui"
   | "implementing_feature"
   | "testing_feature"
   | "fixing_feature"
   | "running_flow_tests"
   | "verifying_alignment"
   | "running_acceptance"
+  | "previewing_release"
   | "deploying"
   | "done"
   | "blocked";
@@ -24,6 +26,8 @@ export type FeatureStatus =
   | "blocked";
 
 export type BugStatus = "open" | "fixed";
+export type ReviewStatus = "pending" | "approved" | "rejected";
+export type DeliveryTrackStatus = "pending" | "in_progress" | "done";
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
@@ -34,6 +38,8 @@ export interface FeatureSpec {
   description: string;
   acceptanceCriteria: string[];
   status: FeatureStatus;
+  frontendStatus: DeliveryTrackStatus;
+  backendStatus: DeliveryTrackStatus;
   implementationAttempts: number;
   testAttempts: number;
 }
@@ -68,6 +74,8 @@ export interface SpecArtifact {
 
 // Stitch 生成出来的 UI 产物信息。
 export interface UiArtifact {
+  versionNumber: number;
+  directoryPath: string;
   stitchJobId: string;
   projectId?: string;
   screenId?: string;
@@ -77,7 +85,18 @@ export interface UiArtifact {
   metadataPath?: string;
   runtime: "real" | "mock";
   note?: string;
+  generatedFromFeedback?: string;
+  reviewStatus: ReviewStatus;
+  reviewFeedback?: string;
   status: "ready" | "failed";
+}
+
+// 记录客户在最终预览环节是否同意发布。
+export interface ReleaseApprovalRecord {
+  approved: boolean;
+  feedback?: string;
+  previewPath?: string;
+  decidedAt: string;
 }
 
 // 测试失败后生成的 bug 记录。
@@ -143,9 +162,11 @@ export interface WorkflowJob {
   stage: JobStage;
   specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
+  uiArtifacts: UiArtifact[];
   bugReports: BugReport[];
   testRuns: TestRun[];
   agentRuns: AgentRunRecord[];
+  releaseApproval?: ReleaseApprovalRecord;
   deployment?: DeploymentRecord;
   events: JobEvent[];
   createdAt: string;

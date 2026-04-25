@@ -23,11 +23,22 @@ export class MonitorAgent implements Agent<MonitorAgentInput, MonitorAgentOutput
       findings.push("The workflow has no downloaded UI artifact.");
     }
 
+    if (job.uiArtifact && job.uiArtifact.reviewStatus !== "approved") {
+      findings.push("The current UI artifact is not approved for implementation.");
+    }
+
     const unfinishedFeatures = job.requirement.features.filter(
       (feature) => feature.status !== "done",
     );
     if (unfinishedFeatures.length > 0) {
       findings.push(`${unfinishedFeatures.length} features are still not marked as done.`);
+    }
+
+    const partiallyImplemented = job.requirement.features.filter(
+      (feature) => feature.frontendStatus !== "done" || feature.backendStatus !== "done",
+    );
+    if (partiallyImplemented.length > 0) {
+      findings.push(`${partiallyImplemented.length} features do not have both frontend and backend completed.`);
     }
 
     const aligned = findings.length === 0;

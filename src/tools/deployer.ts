@@ -23,8 +23,11 @@ export class MockDeployer implements Deployer {
       environment,
       deployedAt: new Date().toISOString(),
       features: job.requirement.features.map((feature) => feature.name),
+      releaseApproval: job.releaseApproval ?? null,
       uiArtifact: job.uiArtifact
         ? {
+            versionNumber: job.uiArtifact.versionNumber,
+            directoryPath: job.uiArtifact.directoryPath,
             runtime: job.uiArtifact.runtime,
             projectId: job.uiArtifact.projectId ?? null,
             screenId: job.uiArtifact.screenId ?? null,
@@ -32,8 +35,20 @@ export class MockDeployer implements Deployer {
             imagePath: job.uiArtifact.imagePath ?? null,
             htmlPath: job.uiArtifact.htmlPath ?? null,
             metadataPath: job.uiArtifact.metadataPath ?? null,
+            reviewStatus: job.uiArtifact.reviewStatus,
+            reviewFeedback: job.uiArtifact.reviewFeedback ?? null,
           }
         : null,
+      uiArtifacts: job.uiArtifacts.map((artifact) => ({
+        versionNumber: artifact.versionNumber,
+        directoryPath: artifact.directoryPath,
+        runtime: artifact.runtime,
+        reviewStatus: artifact.reviewStatus,
+        reviewFeedback: artifact.reviewFeedback ?? null,
+        downloadPath: artifact.downloadPath,
+        imagePath: artifact.imagePath ?? null,
+        htmlPath: artifact.htmlPath ?? null,
+      })),
     };
 
     await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");

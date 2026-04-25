@@ -234,6 +234,8 @@ function createFeature(name: string, index: number): FeatureSpec {
       "The feature remains traceable to the approved requirement.",
     ],
     status: "pending",
+    frontendStatus: "pending",
+    backendStatus: "pending",
     implementationAttempts: 0,
     testAttempts: 0,
   };

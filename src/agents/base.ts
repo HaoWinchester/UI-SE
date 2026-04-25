@@ -4,10 +4,13 @@ import type { JobStage } from "../types/domain.js";
 export type AgentName =
   | "spec-agent"
   | "ui-agent"
+  | "frontend-agent"
+  | "backend-agent"
   | "dev-agent"
   | "test-agent"
   | "fix-agent"
   | "monitor-agent"
+  | "acceptance-agent"
   | "deploy-agent";
 
 export type AgentTool =

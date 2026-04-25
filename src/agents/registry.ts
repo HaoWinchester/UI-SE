@@ -35,6 +35,38 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
     writeScopes: ["artifacts/ui"],
     tools: ["repo-read", "stitch-client"],
   },
+  "frontend-agent": {
+    name: "frontend-agent",
+    description: "Plans frontend implementation for the current feature slice.",
+    systemPrompt:
+      "You are the frontend agent. Turn the current feature slice and approved UI reference into a frontend implementation plan that preserves the design and user flow.",
+    runtimeMode: "mock",
+    model: {
+      provider: "openai",
+      model: "gpt-5.4",
+      reasoningEffort: "medium",
+      temperature: 0.2,
+    },
+    readScopes: ["src", "docs", "artifacts/ui", "skills/dev-agent"],
+    writeScopes: ["src"],
+    tools: ["repo-read", "repo-write"],
+  },
+  "backend-agent": {
+    name: "backend-agent",
+    description: "Plans backend implementation for the current feature slice.",
+    systemPrompt:
+      "You are the backend agent. Turn the current feature slice into backend responsibilities, contracts, and validation needs without drifting from the approved requirement.",
+    runtimeMode: "mock",
+    model: {
+      provider: "openai",
+      model: "gpt-5.4",
+      reasoningEffort: "medium",
+      temperature: 0.2,
+    },
+    readScopes: ["src", "docs", "artifacts/specs", "skills/dev-agent"],
+    writeScopes: ["src"],
+    tools: ["repo-read", "repo-write"],
+  },
   "dev-agent": {
     name: "dev-agent",
     description: "Plans implementation for the current feature slice.",
@@ -96,6 +128,22 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
       temperature: 0.1,
     },
     readScopes: ["src", "docs", "artifacts", "skills/monitor-agent"],
+    writeScopes: [],
+    tools: ["repo-read", "job-store"],
+  },
+  "acceptance-agent": {
+    name: "acceptance-agent",
+    description: "Prepares the final customer preview and validates readiness for release approval.",
+    systemPrompt:
+      "You are the acceptance agent. Confirm the workflow is ready for customer preview and surface the best preview artifact before deployment approval is requested.",
+    runtimeMode: "mock",
+    model: {
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      reasoningEffort: "medium",
+      temperature: 0.1,
+    },
+    readScopes: ["src", "artifacts", "docs", "skills/monitor-agent"],
     writeScopes: [],
     tools: ["repo-read", "job-store"],
   },
