@@ -6,11 +6,17 @@ import path from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
 
+import type {
+  SpecClarificationAnswer,
+  SpecClarificationQuestion,
+} from "./agents/spec-agent.js";
 import type { UiArtifact } from "./types/domain.js";
 import type {
   OrchestratorRuntimeHooks,
   ReleaseApprovalDecision,
   ReleaseApprovalRequest,
+  SpecClarificationDecision,
+  SpecClarificationRequest,
   UiApprovalDecision,
   UiApprovalRequest,
 } from "./workflow/orchestrator.js";
@@ -57,6 +63,7 @@ async function main(): Promise<void> {
   try {
     const orchestrator = createDefaultOrchestrator(workspaceRoot, {
       onProgress: createConsoleProgressLogger(),
+      requestSpecClarification: interactionHooks.requestSpecClarification,
       requestUiApproval: interactionHooks.requestUiApproval,
       requestReleaseApproval: interactionHooks.requestReleaseApproval,
     });
@@ -238,10 +245,11 @@ function printHelp(): void {
   console.log("  2. Otherwise read the file passed through --file.");
   console.log(`  3. Otherwise read ${DEFAULT_REQUIREMENT_FILE} from the project root when it exists.`);
   console.log("  4. Finally fall back to the built-in demo requirement when no file exists.");
-  console.log("  5. Ask whether each generated UI version is acceptable before development.");
-  console.log("  6. Ask whether the final preview can be released before deployment.");
-  console.log("  7. Use --yes to auto-approve both confirmation steps.");
-  console.log("  8. Automatically open previews unless --no-open is provided.");
+  console.log("  5. Run a Speckit-style clarification loop before Stitch UI generation.");
+  console.log("  6. Ask whether each generated UI version is acceptable before development.");
+  console.log("  7. Ask whether the final preview can be released before deployment.");
+  console.log("  8. Use --yes to auto-accept clarification recommendations and approval steps.");
+  console.log("  9. Automatically open previews unless --no-open is provided.");
 }
 
 function createConsoleProgressLogger(): (message: string) => void {
@@ -256,6 +264,52 @@ function createInteractionHooks(cliOptions: CliOptions): InteractionHooks {
   const rl = interactive ? createInterface({ input, output }) : undefined;
 
   return {
+    requestSpecClarification: async (
+      request: SpecClarificationRequest,
+    ): Promise<SpecClarificationDecision> => {
+      if (!rl) {
+        const autoAnswer = buildAutoClarificationAnswer(request.question);
+        console.log("");
+        console.log(
+          `[clarify] 自动接受第 ${request.askedCount}/${request.maxQuestions} 个澄清问题：${request.question.question}`,
+        );
+        console.log(`[clarify] 采用答案：${autoAnswer.answer}`);
+        return {
+          type: "answered",
+          answer: autoAnswer,
+        };
+      }
+
+      console.log("");
+      console.log(`Speckit 澄清问题 ${request.askedCount}/${request.maxQuestions}`);
+      console.log(`主题：${request.question.topic}`);
+      console.log(`背景：${request.question.context}`);
+      console.log(`问题：${request.question.question}`);
+
+      if (request.question.answerFormat === "option") {
+        printOptionClarificationQuestion(request.question);
+      } else {
+        printShortClarificationQuestion(request.question);
+      }
+
+      while (true) {
+        const rawAnswer = (await rl.question("你的回答：")).trim();
+
+        if (isClarificationStop(rawAnswer)) {
+          return { type: "stop" };
+        }
+
+        const parsedAnswer = parseClarificationAnswer(request.question, rawAnswer);
+        if (parsedAnswer) {
+          return {
+            type: "answered",
+            answer: parsedAnswer,
+          };
+        }
+
+        console.log("未识别当前回答，请输入选项字母、yes/recommended，或简短自定义答案。");
+      }
+    },
     requestUiApproval: async (request: UiApprovalRequest): Promise<UiApprovalDecision> => {
       await openPreviewPathIfNeeded(
         request.uiArtifact.htmlPath ?? request.uiArtifact.imagePath ?? request.uiArtifact.downloadPath,
@@ -317,6 +371,120 @@ function createInteractionHooks(cliOptions: CliOptions): InteractionHooks {
 
 function isAffirmative(answer: string): boolean {
   return ["y", "yes", "ok", "true", "1", "是", "满意"].includes(answer);
+}
+
+function isClarificationStop(answer: string): boolean {
+  return ["done", "stop", "proceed", "good", "no more", "结束", "继续", "跳过"].includes(
+    answer.toLowerCase(),
+  );
+}
+
+function printOptionClarificationQuestion(question: SpecClarificationQuestion): void {
+  console.log(
+    `推荐：${question.recommendation} - ${question.recommendationReason}`,
+  );
+  for (const option of question.options ?? []) {
+    console.log(`  ${option.key}. ${option.answer} —— ${option.implication}`);
+  }
+  console.log('可输入选项字母，例如 "A"；输入 "yes" / "recommended" 接受推荐；也可以直接输入简短自定义答案。');
+}
+
+function printShortClarificationQuestion(question: SpecClarificationQuestion): void {
+  console.log(
+    `建议：${question.recommendation} - ${question.recommendationReason}`,
+  );
+  console.log(
+    `回答格式：简短短语${question.maxWords ? `（建议不超过 ${question.maxWords} 个词）` : ""}。可输入 "yes" / "suggested" 接受建议答案。`,
+  );
+}
+
+function buildAutoClarificationAnswer(question: SpecClarificationQuestion): SpecClarificationAnswer {
+  return {
+    questionId: question.id,
+    topic: question.topic,
+    answer: resolveRecommendedAnswer(question),
+    rationale: question.recommendationReason,
+    source: "recommended",
+  };
+}
+
+function parseClarificationAnswer(
+  question: SpecClarificationQuestion,
+  rawAnswer: string,
+): SpecClarificationAnswer | undefined {
+  const normalized = rawAnswer.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const lower = normalized.toLowerCase();
+  if (["yes", "y", "recommended", "suggested", "是", "推荐", "建议"].includes(lower)) {
+    return buildAutoClarificationAnswer(question);
+  }
+
+  if (question.answerFormat === "option") {
+    const optionAnswer = resolveOptionAnswer(question, normalized);
+    if (optionAnswer) {
+      return optionAnswer;
+    }
+  }
+
+  if (isShortAnswerWithinLimit(normalized, question.maxWords)) {
+    return {
+      questionId: question.id,
+      topic: question.topic,
+      answer: normalized,
+      rationale: "用户提供了自定义澄清答案。",
+      source: "user",
+    };
+  }
+
+  return undefined;
+}
+
+function resolveOptionAnswer(
+  question: SpecClarificationQuestion,
+  rawAnswer: string,
+): SpecClarificationAnswer | undefined {
+  const normalized = rawAnswer.trim().toLowerCase();
+  const matchedOption = (question.options ?? []).find(
+    (option) =>
+      option.key.toLowerCase() === normalized ||
+      option.answer.toLowerCase() === normalized,
+  );
+  if (!matchedOption) {
+    return undefined;
+  }
+
+  return {
+    questionId: question.id,
+    topic: question.topic,
+    answer: matchedOption.answer,
+    rationale: matchedOption.implication,
+    source:
+      matchedOption.key.toLowerCase() === question.recommendation.toLowerCase()
+        ? "recommended"
+        : "user",
+  };
+}
+
+function resolveRecommendedAnswer(question: SpecClarificationQuestion): string {
+  if (question.answerFormat === "option") {
+    const matchedOption = (question.options ?? []).find(
+      (option) => option.key.toLowerCase() === question.recommendation.toLowerCase(),
+    );
+    return matchedOption?.answer ?? question.recommendation;
+  }
+
+  return question.recommendation;
+}
+
+function isShortAnswerWithinLimit(answer: string, maxWords = 5): boolean {
+  if (/[\u4e00-\u9fff]/.test(answer) && !/\s/.test(answer)) {
+    return answer.length <= 24;
+  }
+
+  return answer.split(/\s+/).filter(Boolean).length <= maxWords;
 }
 
 async function openPreviewPathIfNeeded(

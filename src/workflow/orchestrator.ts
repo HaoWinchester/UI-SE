@@ -13,6 +13,10 @@ import { DeployAgent } from "../agents/deploy-agent.js";
 import { FixAgent } from "../agents/fix-agent.js";
 import { FrontendAgent } from "../agents/frontend-agent.js";
 import { MonitorAgent } from "../agents/monitor-agent.js";
+import type {
+  SpecClarificationAnswer,
+  SpecClarificationQuestion,
+} from "../agents/spec-agent.js";
 import { SpecAgent } from "../agents/spec-agent.js";
 import { TestAgent } from "../agents/test-agent.js";
 import { UiAgent } from "../agents/ui-agent.js";
@@ -63,8 +67,24 @@ export interface ReleaseApprovalRequest {
   previewPath?: string;
 }
 
+export interface SpecClarificationRequest {
+  jobId: string;
+  question: SpecClarificationQuestion;
+  askedCount: number;
+  maxQuestions: number;
+  draftSpecMarkdown: string;
+}
+
+export interface SpecClarificationDecision {
+  type: "answered" | "stop";
+  answer?: SpecClarificationAnswer;
+}
+
 export interface OrchestratorRuntimeHooks {
   onProgress?: (message: string) => void;
+  requestSpecClarification?: (
+    request: SpecClarificationRequest,
+  ) => Promise<SpecClarificationDecision>;
   requestUiApproval?: (request: UiApprovalRequest) => Promise<UiApprovalDecision>;
   requestReleaseApproval?: (
     request: ReleaseApprovalRequest,
@@ -94,6 +114,9 @@ interface OrchestratorDependencies {
   customerPreviewManager: CustomerPreviewManager;
   baseDir: string;
   onProgress?: (message: string) => void;
+  requestSpecClarification?: (
+    request: SpecClarificationRequest,
+  ) => Promise<SpecClarificationDecision>;
   requestUiApproval?: (request: UiApprovalRequest) => Promise<UiApprovalDecision>;
   requestReleaseApproval?: (
     request: ReleaseApprovalRequest,
@@ -111,15 +134,112 @@ export class DeliveryOrchestrator {
     const codeWorkspace = createCodeWorkspace(jobId);
     const logFilePath = getWorkflowLogFilePath(jobId);
     await this.deps.repoWriter.ensureWorkspace(codeWorkspace);
-    this.notifyProgress("正在分析原始需求，并生成澄清后的 spec。");
+    this.notifyProgress("正在按照 Speckit 流程生成初始 spec。");
 
-    const specExecution = await this.prepareAgentRun(
+    const specRecords: AgentRunRecord[] = [];
+    const specEvents: WorkflowJob["events"] = [];
+    const clarificationAnswers: SpecClarificationAnswer[] = [];
+
+    let specExecution = await this.prepareAgentRun(
       jobId,
       "drafting_spec",
       this.deps.specAgent,
-      { rawRequirement },
+      {
+        rawRequirement,
+        clarificationAnswers,
+      },
     );
-    const now = specExecution.record.createdAt;
+    specRecords.push(specExecution.record);
+    specEvents.push({
+      stage: "drafting_spec",
+      message: formatAgentEvent(specExecution.record),
+      createdAt: specExecution.record.createdAt,
+    });
+    await this.persistWorkflowLog(jobId, {
+      createdAt: specExecution.record.createdAt,
+      level: "info",
+      stage: "drafting_spec",
+      message: "Initial Speckit spec draft generated.",
+      details: {
+        pendingQuestionCount: specExecution.result.data.pendingQuestions.length,
+      },
+    });
+
+    let askedCount = 0;
+    while (specExecution.result.data.pendingQuestions.length > 0 && askedCount < 5) {
+      const question = specExecution.result.data.pendingQuestions[0];
+      this.notifyProgress(
+        `正在进行 Speckit 需求澄清（${askedCount + 1}/${5}）：${question.question}`,
+      );
+      const decision = await this.requestSpecClarification({
+        jobId,
+        question,
+        askedCount: askedCount + 1,
+        maxQuestions: 5,
+        draftSpecMarkdown: specExecution.result.data.specMarkdown,
+      });
+      if (decision.type === "stop" || !decision.answer) {
+        await this.persistWorkflowLog(jobId, {
+          createdAt: new Date().toISOString(),
+          level: "warn",
+          stage: "drafting_spec",
+          message: "Requirement clarification was stopped before all pending questions were answered.",
+          details: {
+            remainingQuestions: specExecution.result.data.pendingQuestions.map(
+              (item) => item.topic,
+            ),
+          },
+        });
+        break;
+      }
+
+      askedCount += 1;
+      clarificationAnswers.push(decision.answer);
+      specEvents.push({
+        stage: "drafting_spec",
+        message: `Clarification ${askedCount}: ${decision.answer.topic} -> ${decision.answer.answer}`,
+        createdAt: new Date().toISOString(),
+      });
+      await this.persistWorkflowLog(jobId, {
+        createdAt: new Date().toISOString(),
+        level: "info",
+        stage: "drafting_spec",
+        message: `Accepted clarification ${askedCount}: ${decision.answer.topic}.`,
+        details: {
+          answer: decision.answer.answer,
+          source: decision.answer.source,
+          rationale: decision.answer.rationale,
+        },
+      });
+
+      specExecution = await this.prepareAgentRun(
+        jobId,
+        "drafting_spec",
+        this.deps.specAgent,
+        {
+          rawRequirement,
+          clarificationAnswers,
+        },
+      );
+      specRecords.push(specExecution.record);
+      specEvents.push({
+        stage: "drafting_spec",
+        message: formatAgentEvent(specExecution.record),
+        createdAt: specExecution.record.createdAt,
+      });
+      await this.persistWorkflowLog(jobId, {
+        createdAt: specExecution.record.createdAt,
+        level: "info",
+        stage: "drafting_spec",
+        message: "Regenerated the spec after applying the latest clarification answer.",
+        details: {
+          askedCount,
+          pendingQuestionCount: specExecution.result.data.pendingQuestions.length,
+        },
+      });
+    }
+
+    const now = new Date().toISOString();
     const specArtifact = await this.persistSpecArtifact(
       jobId,
       specExecution.result.data.requirement,
@@ -139,19 +259,15 @@ export class DeliveryOrchestrator {
       databaseRuns: [],
       bugReports: [],
       testRuns: [],
-      agentRuns: [
-        {
-          ...specExecution.record,
-          artifacts: [...specExecution.record.artifacts, specArtifact.markdownPath],
-        },
-      ],
-      events: [
-        {
-          stage: "drafting_spec",
-          message: formatAgentEvent(specExecution.record),
-          createdAt: now,
-        },
-      ],
+      agentRuns: specRecords.map((record, index) =>
+        index === specRecords.length - 1
+          ? {
+              ...record,
+              artifacts: [...record.artifacts, specArtifact.markdownPath],
+            }
+          : record,
+      ),
+      events: specEvents,
       createdAt: now,
       updatedAt: now,
     };
@@ -164,6 +280,8 @@ export class DeliveryOrchestrator {
       message: "Job created and initial spec clarification completed.",
       details: {
         specPath: specArtifact.markdownPath,
+        clarificationCount: clarificationAnswers.length,
+        pendingQuestionCount: specExecution.result.data.pendingQuestions.length,
       },
     });
     await this.refreshDashboard(jobId);
@@ -1335,6 +1453,16 @@ export class DeliveryOrchestrator {
     return { approved: true };
   }
 
+  private async requestSpecClarification(
+    request: SpecClarificationRequest,
+  ): Promise<SpecClarificationDecision> {
+    if (this.deps.requestSpecClarification) {
+      return this.deps.requestSpecClarification(request);
+    }
+
+    return { type: "stop" };
+  }
+
   private async requestReleaseApproval(
     request: ReleaseApprovalRequest,
   ): Promise<ReleaseApprovalDecision> {
@@ -1429,6 +1557,7 @@ export function createDefaultOrchestrator(
     customerPreviewManager: new StaticCustomerPreviewManager(baseDir),
     baseDir,
     onProgress: hooks.onProgress,
+    requestSpecClarification: hooks.requestSpecClarification,
     requestUiApproval: hooks.requestUiApproval,
     requestReleaseApproval: hooks.requestReleaseApproval,
   });

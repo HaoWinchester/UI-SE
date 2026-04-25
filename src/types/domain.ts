@@ -85,7 +85,7 @@ export interface ProductRequirement {
   features: FeatureSpec[];
 }
 
-// 记录一次“需求澄清”的结果，说明我们补了什么默认值或决定。
+// 记录一次“需求澄清”的结果，说明用户或系统在 Speckit 澄清环节确定了什么关键信息。
 export interface RequirementClarification {
   topic: string;
   answer: string;

@@ -4,3 +4,4 @@ dist
 .npm-cache
 artifacts
 .DS_Store
+specs/[0-9][0-9][0-9]-*/

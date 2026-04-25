@@ -71,14 +71,14 @@ npm run dev -- --yes --no-open
 4. 代码内置的兜底演示需求
 
 默认情况下，生成完成后会自动打开 HTML 预览；如果你不想自动弹出预览，可以加 `--no-open`。
-如果你不想在终端里逐次回答“是否满意当前设计”“是否允许发布”，可以加 `--yes` 自动通过确认节点。
+如果你不想在终端里逐次回答“Speckit 澄清问题”“是否满意当前设计”“是否允许发布”，可以加 `--yes` 自动接受推荐答案并通过确认节点。
 
 ## 当前主流程
 
 当前最重要的一条链路已经是：
 
 1. 输入一句话需求
-2. `spec-agent` 先自动澄清需求，生成结构化 spec
+2. `spec-agent` 先按 Speckit CLI 风格逐题澄清需求，生成结构化 spec
 3. 将这份 spec 落到 `artifacts/specs`
 4. `ui-agent` 基于澄清后的 spec 组织 Stitch prompt
 5. `stitch-client` 调用 Stitch 生成并下载 UI 到 `artifacts/ui/<jobId>/v<版本号>/`
@@ -95,7 +95,9 @@ npm run dev -- --yes --no-open
 同时，控制台现在也会实时打印进度，例如：
 
 - 已接收需求输入
-- 正在分析原始需求
+- 正在按照 Speckit 流程生成初始 spec
+- 正在进行 Speckit 需求澄清（1/5）
+- 自动接受或等待你回答澄清问题
 - spec 已生成
 - 正在执行 `ui-agent`
 - 正在等待 Stitch 生成 UI
@@ -247,14 +249,22 @@ npm run dev -- --yes --no-open
 
 ## Speckit 风格澄清
 
-目前项目里已经接上了“Speckit 风格”的自动澄清思路，虽然还不是完整的交互式追问版本，但已经会在进入 UI 生成前自动补齐以下内容：
+现在这一层已经不再是“静默自动补默认值”，而是会在进入 Stitch 之前，按 Speckit CLI 的节奏先做一轮逐题澄清：
+
+- 每次只问 1 个高影响问题
+- 默认最多问 5 个问题
+- 优先问会影响首版范围、终端形态、核心用户路径这类关键决策
+- 你可以输入选项字母、直接接受推荐答案，或者给一个简短自定义答案
+- 如果带 `--yes`，系统会自动采用推荐答案继续往下走
+
+澄清完成后，spec 里会明确写出：
 
 - 澄清后的需求摘要
 - 功能切片（feature slices）
 - 用户场景（user scenarios）
 - 成功标准（success criteria）
 - 假设条件（assumptions）
-- 默认澄清项（clarifications）
+- 已确认的澄清项（clarifications）
 
 生成后的 spec 会写到：
 
