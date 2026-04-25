@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import type { UiArtifact } from "./types/domain.js";
 import { createDefaultOrchestrator } from "./workflow/orchestrator.js";
 
 const DEFAULT_REQUIREMENT_FILE = "requirement.md";
@@ -16,6 +18,7 @@ Build a delivery workflow for an AI-assisted product team.
 interface CliOptions {
   requirementFilePath?: string;
   inlinePrompt?: string;
+  autoOpenPreview: boolean;
   showHelp: boolean;
 }
 
@@ -37,7 +40,12 @@ async function main(): Promise<void> {
   const requirementInput = await loadRequirementInput(cliOptions, workspaceRoot);
 
   // 创建总调度器。后面所有 agent、测试、部署、Stitch 调用都由它统一安排。
-  const orchestrator = createDefaultOrchestrator(workspaceRoot);
+  const orchestrator = createDefaultOrchestrator(
+    workspaceRoot,
+    createConsoleProgressLogger(),
+  );
+
+  console.log(`已接收需求输入，来源：${requirementInput.sourceLabel}`);
 
   // 第一步：根据原始需求创建一个 job，并先生成结构化 spec。
   const job = await orchestrator.createJob(requirementInput.rawRequirement);
@@ -55,11 +63,13 @@ async function main(): Promise<void> {
   console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
   console.log(`UI artifact runtime: ${result.uiArtifact?.runtime ?? "none"}`);
   if (result.uiArtifact?.note) {
-    console.log(`UI note: ${result.uiArtifact.note}`);
+  console.log(`UI note: ${result.uiArtifact.note}`);
   }
   console.log(`UI image: ${result.uiArtifact?.imagePath ?? result.uiArtifact?.downloadPath ?? "none"}`);
   console.log(`UI html: ${result.uiArtifact?.htmlPath ?? "none"}`);
   console.log(`Deployment: ${result.deployment?.manifestPath ?? "not deployed"}`);
+
+  await autoOpenPreviewIfNeeded(result.uiArtifact, cliOptions.autoOpenPreview);
 }
 
 // 解析命令行参数，当前支持：
@@ -68,6 +78,7 @@ async function main(): Promise<void> {
 // `--help`
 function parseCliArgs(args: string[], workspaceRoot: string): CliOptions {
   const options: CliOptions = {
+    autoOpenPreview: true,
     showHelp: false,
   };
 
@@ -76,6 +87,11 @@ function parseCliArgs(args: string[], workspaceRoot: string): CliOptions {
 
     if (arg === "--help" || arg === "-h") {
       options.showHelp = true;
+      continue;
+    }
+
+    if (arg === "--no-open") {
+      options.autoOpenPreview = false;
       continue;
     }
 
@@ -180,12 +196,92 @@ function printHelp(): void {
   console.log('  npm run dev -- --prompt "Build a project dashboard"');
   console.log('  npm run dev -- "Build a project dashboard"');
   console.log("  npm run dev -- --file ./requirement.md");
+  console.log("  npm run dev -- --no-open");
   console.log("");
   console.log("Behavior:");
   console.log("  1. Read the inline prompt when provided.");
   console.log("  2. Otherwise read the file passed through --file.");
   console.log(`  3. Otherwise read ${DEFAULT_REQUIREMENT_FILE} from the project root when it exists.`);
   console.log("  4. Finally fall back to the built-in demo requirement when no file exists.");
+  console.log("  5. Automatically open the generated HTML preview unless --no-open is provided.");
+}
+
+// 统一打印一层进度日志，让控制台在长流程里也能持续给反馈。
+function createConsoleProgressLogger(): (message: string) => void {
+  return (message: string) => {
+    console.log(`[progress] ${message}`);
+  };
+}
+
+// 生成完成后优先打开 HTML 预览；如果没有 HTML，再回退到图片。
+async function autoOpenPreviewIfNeeded(
+  uiArtifact: UiArtifact | undefined,
+  autoOpenPreview: boolean,
+): Promise<void> {
+  if (!autoOpenPreview || !uiArtifact || uiArtifact.status !== "ready") {
+    return;
+  }
+
+  const previewPath = uiArtifact.htmlPath ?? uiArtifact.imagePath ?? uiArtifact.downloadPath;
+  if (!previewPath) {
+    return;
+  }
+
+  const command = resolveOpenCommand(previewPath);
+  if (!command) {
+    console.log("Preview: current platform does not support automatic preview opening.");
+    return;
+  }
+
+  console.log(`Preview: opening ${previewPath}`);
+
+  try {
+    const child = spawn(command.command, command.args, {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch (error) {
+    console.warn(`Preview: failed to open automatically. ${formatError(error)}`);
+  }
+}
+
+function resolveOpenCommand(targetPath: string):
+  | {
+      command: string;
+      args: string[];
+    }
+  | undefined {
+  if (process.platform === "darwin") {
+    return {
+      command: "open",
+      args: [targetPath],
+    };
+  }
+
+  if (process.platform === "win32") {
+    return {
+      command: "cmd",
+      args: ["/c", "start", "", targetPath],
+    };
+  }
+
+  if (process.platform === "linux") {
+    return {
+      command: "xdg-open",
+      args: [targetPath],
+    };
+  }
+
+  return undefined;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 // 统一兜底错误，避免异常直接静默退出。

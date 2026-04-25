@@ -52,6 +52,9 @@ npm run dev -- --file ./requirement.md
 
 # 查看帮助
 npm run dev -- --help
+
+# 仅运行流程，不自动打开预览
+npm run dev -- --no-open
 ```
 
 输入优先级如下：
@@ -60,6 +63,8 @@ npm run dev -- --help
 2. `--file` 指定的需求文件
 3. 项目根目录下的 `requirement.md`
 4. 代码内置的兜底演示需求
+
+默认情况下，生成完成后会自动打开 HTML 预览；如果你不想自动弹出预览，可以加 `--no-open`。
 
 ## 当前主流程
 
@@ -76,6 +81,15 @@ npm run dev -- --help
 `一句话需求 -> 澄清 spec -> Stitch 生成 UI`
 
 这样生成结果会更稳定，因为 Stitch 拿到的是更清晰的输入，而不是一条过于模糊的原始描述。
+
+同时，控制台现在也会实时打印进度，例如：
+
+- 已接收需求输入
+- 正在分析原始需求
+- spec 已生成
+- 正在执行 `ui-agent`
+- 正在等待 Stitch 生成 UI
+- UI 下载完成
 
 ## Speckit 风格澄清
 

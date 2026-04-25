@@ -42,6 +42,7 @@ interface OrchestratorDependencies {
   testRunner: TestRunner;
   deployer: Deployer;
   baseDir: string;
+  onProgress?: (message: string) => void;
 }
 
 // DeliveryOrchestrator 是整套系统的总调度器。
@@ -52,6 +53,7 @@ export class DeliveryOrchestrator {
   async createJob(rawRequirement: string): Promise<WorkflowJob> {
     // 新任务创建时，先让 spec-agent 把自然语言需求整理成结构化 requirement。
     const jobId = randomUUID();
+    this.notifyProgress("正在分析原始需求，并生成澄清后的 spec。");
     // prepareAgentRun 只负责执行 agent 并产出结构化记录，
     // 此时还不会把结果写入 store。
     const specExecution = await this.prepareAgentRun(
@@ -62,6 +64,7 @@ export class DeliveryOrchestrator {
     );
     const now = specExecution.record.createdAt;
     const specArtifact = await this.persistSpecArtifact(jobId, specExecution.result.data.specMarkdown);
+    this.notifyProgress(`需求澄清完成，spec 已写入 ${specArtifact.markdownPath}。`);
 
     // 用 spec-agent 的输出组装任务初始状态。
     const job: WorkflowJob = {
@@ -347,12 +350,14 @@ export class DeliveryOrchestrator {
     for (let poll = 0; poll < 5; poll += 1) {
       // 先轮询 Stitch 状态，只有 completed 才会触发下载。
       const status = await this.deps.stitchClient.getStatus(submission.stitchJobId);
+      this.notifyProgress(`正在等待 Stitch 生成 UI，当前状态：${status}。`);
       if (status === "completed") {
         // 产物会统一下载到 artifacts/ui，方便后续开发和排查。
         const download = await this.deps.stitchClient.downloadResult(
           submission.stitchJobId,
           path.join(this.deps.baseDir, "artifacts", "ui"),
         );
+        this.notifyProgress(`UI 产物下载完成：${download.downloadPath}。`);
 
         return {
           stitchJobId: submission.stitchJobId,
@@ -412,6 +417,7 @@ export class DeliveryOrchestrator {
   ): Promise<AgentResult<Output>> {
     // executeAgent 会顺带把运行记录和事件日志写回 store，
     // 这样后面排查流程时可以看到每一步是谁做的、做了什么判断。
+    this.notifyProgress(`正在执行 ${agent.definition.name}。`);
     const execution = await this.prepareAgentRun(jobId, stage, agent, input);
 
     // agent 本次运行完成后，把结构化记录追加到 job.agentRuns 和 job.events。
@@ -433,6 +439,7 @@ export class DeliveryOrchestrator {
 
   private async transition(jobId: string, stage: JobStage, message: string): Promise<void> {
     // 所有阶段切换统一走这里，方便保证 stage 和事件日志始终同步。
+    this.notifyProgress(`[${stage}] ${message}`);
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       stage,
@@ -526,6 +533,10 @@ export class DeliveryOrchestrator {
 
     return feature;
   }
+
+  private notifyProgress(message: string): void {
+    this.deps.onProgress?.(message);
+  }
 }
 
 // 把一次 agent 运行转换成结构化记录，后面会落进 job.agentRuns。
@@ -570,7 +581,10 @@ function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugRepor
 }
 
 // 创建一套默认依赖，方便 index.ts 直接启动一个可运行的 demo。
-export function createDefaultOrchestrator(baseDir: string): DeliveryOrchestrator {
+export function createDefaultOrchestrator(
+  baseDir: string,
+  onProgress?: (message: string) => void,
+): DeliveryOrchestrator {
   return new DeliveryOrchestrator({
     store: new InMemoryJobStore(),
     specAgent: new SpecAgent(),
@@ -584,5 +598,6 @@ export function createDefaultOrchestrator(baseDir: string): DeliveryOrchestrator
     testRunner: new MockTestRunner(),
     deployer: new MockDeployer(baseDir),
     baseDir,
+    onProgress,
   });
 }
