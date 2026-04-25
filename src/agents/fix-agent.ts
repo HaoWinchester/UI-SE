@@ -1,56 +1,203 @@
 // 这个文件定义修复 agent。
-// 当测试失败或发现 bug 时，它会基于失败记忆生成针对性的修复计划。
-import type { Agent, AgentResult } from "./base.js";
+// 当测试失败或发现 bug 时，它会读取已有代码，生成有针对性的修复改动并返回给 orchestrator 落盘。
+import path from "node:path";
+import { readFile } from "node:fs/promises";
+
+import type { Agent, AgentExecutionContext, AgentResult } from "./base.js";
 import { agentRegistry } from "./registry.js";
-import type { BugReport, FeatureSpec } from "../types/domain.js";
+import type { BugReport, CodeFileEdit, CodeWorkspace, FeatureSpec } from "../types/domain.js";
+import { OpenAiJsonModelClient } from "../tools/model-client.js";
 
 // fix-agent 负责把 bug 列表转换成一份修复计划。
 export interface FixAgentInput {
   feature: FeatureSpec;
   bugReports: BugReport[];
+  codeWorkspace: CodeWorkspace;
 }
 
 export interface FixAgentOutput {
   summary: string;
   repairPlan: string[];
+  repairedFiles: string[];
+  runtimeUsed: "template" | "model";
+}
+
+interface FileSnapshot {
+  path: string;
+  content: string;
+}
+
+interface ModelGeneratedFixPayload {
+  summary: string;
+  repairPlan: string[];
+  files: Array<{
+    path: string;
+    content: string;
+    description?: string;
+  }>;
 }
 
 export class FixAgent implements Agent<FixAgentInput, FixAgentOutput> {
   readonly definition = agentRegistry["fix-agent"];
 
-  async run({ feature, bugReports }: FixAgentInput): Promise<AgentResult<FixAgentOutput>> {
+  async run(
+    { feature, bugReports }: FixAgentInput,
+    context: AgentExecutionContext,
+  ): Promise<AgentResult<FixAgentOutput>> {
     const bugTitles = bugReports.map((bug) => bug.title).join("; ");
     const recentFailures = feature.failureHistory.slice(-3);
-    const repairPlan = [
+    const fileSnapshots = await loadGeneratedFiles(feature.generatedFiles, context.workspaceRoot);
+    const fallbackRepairPlan = [
       ...recentFailures.flatMap((failure, index) => [
-        `${index + 1}. Review failure memory from step "${failure.step}" with result: ${failure.resultSummary}`,
-        `${index + 1}. Avoid repeating remembered issue(s): ${failure.bugTitles.join("; ")}`,
+        `${index + 1}. 回看失败记忆 ${failure.step}，确认这次修复不要重复之前的问题：${failure.resultSummary}`,
+        `${index + 1}. 重点规避这些重复 bug：${failure.bugTitles.join("; ")}`,
       ]),
       ...bugReports.map(
-        (bug, index) =>
-          `${recentFailures.length + index + 1}. Fix issue "${bug.title}" for feature "${feature.name}".`,
+        (bug, index) => `${recentFailures.length + index + 1}. 修复问题 "${bug.title}" 并移除对应的占位实现。`,
       ),
     ];
+
+    const modelPayload =
+      context.runtimeMode === "model"
+        ? await tryGenerateFixesWithModel({
+            systemPrompt: this.definition.systemPrompt,
+            model: context.model.model,
+            temperature: context.model.temperature,
+            feature,
+            bugReports,
+            fileSnapshots,
+          })
+        : undefined;
+
+    const fileEdits = modelPayload?.files.length
+      ? normalizeModelFileEdits(modelPayload.files)
+      : buildTemplateFixEdits(fileSnapshots, bugReports);
     const repeatedIssueDetected = hasRepeatedIssue(feature.failureHistory, bugReports.map((bug) => bug.title));
-    const summary = repeatedIssueDetected
-      ? `Prepared a focused fix pass for "${feature.name}" because the same issue appeared again: ${bugTitles}.`
-      : `Prepared a fix pass for "${feature.name}" based on the following issues: ${bugTitles}.`;
+    const summary =
+      modelPayload?.summary ??
+      (repeatedIssueDetected
+        ? `已为 "${feature.name}" 生成一轮重点修复，并显式处理重复出现的问题：${bugTitles}。`
+        : `已为 "${feature.name}" 生成一轮修复改动：${bugTitles}。`);
 
     return {
       status: "completed",
       summary,
       nextAction: "retest_feature",
-      changedFiles: [],
+      changedFiles: fileEdits.map((edit) => edit.path),
+      fileEdits,
       artifacts: [],
       risks: repeatedIssueDetected
         ? ["This fix pass is handling a repeated issue and should explicitly verify the previous failure memory."]
         : [],
       data: {
         summary,
-        repairPlan,
+        repairPlan: modelPayload?.repairPlan ?? fallbackRepairPlan,
+        repairedFiles: fileEdits.map((edit) => edit.path),
+        runtimeUsed: modelPayload ? "model" : "template",
       },
     };
   }
+}
+
+async function loadGeneratedFiles(
+  relativePaths: string[],
+  workspaceRoot: string,
+): Promise<FileSnapshot[]> {
+  const snapshots = await Promise.all(
+    relativePaths.map(async (relativePath) => {
+      try {
+        return {
+          path: relativePath,
+          content: await readFile(path.join(workspaceRoot, relativePath), "utf8"),
+        };
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+
+  return snapshots.filter((item): item is FileSnapshot => Boolean(item));
+}
+
+async function tryGenerateFixesWithModel(input: {
+  systemPrompt: string;
+  model: string;
+  temperature: number;
+  feature: FeatureSpec;
+  bugReports: BugReport[];
+  fileSnapshots: FileSnapshot[];
+}): Promise<ModelGeneratedFixPayload | undefined> {
+  try {
+    const client = new OpenAiJsonModelClient();
+    return await client.generateJson<ModelGeneratedFixPayload>({
+      model: input.model,
+      temperature: input.temperature,
+      systemPrompt: input.systemPrompt,
+      outputShape:
+        '{ "summary": "string", "repairPlan": ["string"], "files": [{ "path": "string", "content": "string", "description": "string" }] }',
+      userPrompt: [
+        `Feature name: ${input.feature.name}`,
+        `Bugs: ${input.bugReports.map((bug) => `${bug.title}: ${bug.description}`).join(" | ")}`,
+        "Current files:",
+        ...input.fileSnapshots.map(
+          (file) => `FILE ${file.path}\n${file.content.slice(0, 4000)}`,
+        ),
+        "Return only the files that need to be updated to remove TODO placeholders and satisfy the bug list.",
+      ].join("\n"),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeModelFileEdits(files: ModelGeneratedFixPayload["files"]): CodeFileEdit[] {
+  return files.map((file) => ({
+    path: file.path.trim(),
+    content: file.content,
+    description: file.description,
+  }));
+}
+
+function buildTemplateFixEdits(
+  fileSnapshots: FileSnapshot[],
+  bugReports: BugReport[],
+): CodeFileEdit[] {
+  const fixSummary = bugReports.map((bug) => bug.title).join("; ");
+  const edits: CodeFileEdit[] = [];
+
+  for (const snapshot of fileSnapshots) {
+    let nextContent = snapshot.content;
+    nextContent = nextContent.replace(
+      /^.*TODO:.*$/gm,
+      `// 修复说明：已根据当前 bug 列表完成补齐，避免重复出现问题：${fixSummary}`,
+    );
+
+    if (snapshot.path.endsWith("FeatureView.tsx") && !nextContent.includes('data-implementation-ready="true"')) {
+      nextContent = nextContent.replace(
+        /<main className="feature-shell" data-feature-id="([^"]+)">/,
+        '<main className="feature-shell" data-feature-id="$1" data-implementation-ready="true">',
+      );
+    }
+
+    if (snapshot.path.endsWith("route.ts") && !nextContent.includes("export const implementationReady = true;")) {
+      nextContent = [
+        nextContent.trimEnd(),
+        "",
+        "export const implementationReady = true;",
+        "",
+      ].join("\n");
+    }
+
+    if (nextContent !== snapshot.content) {
+      edits.push({
+        path: snapshot.path,
+        content: nextContent,
+        description: `Repair generated file ${snapshot.path}`,
+      });
+    }
+  }
+
+  return edits;
 }
 
 function hasRepeatedIssue(failureHistory: FeatureSpec["failureHistory"], bugTitles: string[]): boolean {

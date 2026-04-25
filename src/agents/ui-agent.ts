@@ -74,6 +74,7 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
       summary: `Prepared a Stitch submission prompt from the clarified spec for ${requirement.features.length} features.`,
       nextAction: "submit_to_stitch",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: [],
       data: {

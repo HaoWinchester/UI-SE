@@ -76,6 +76,10 @@ async function main(): Promise<void> {
     console.log(`Selected UI version: ${result.uiArtifact?.versionNumber ?? "none"}`);
     console.log(`Agent runs: ${result.agentRuns.length}`);
     console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
+    console.log(`Code workspace: ${path.join(workspaceRoot, result.codeWorkspace.rootDir)}`);
+    console.log(
+      `Generated code files: ${result.requirement.features.reduce((total, feature) => total + feature.generatedFiles.length, 0)}`,
+    );
     console.log(`UI artifact runtime: ${result.uiArtifact?.runtime ?? "none"}`);
     if (result.uiArtifact?.note) {
       console.log(`UI note: ${result.uiArtifact.note}`);

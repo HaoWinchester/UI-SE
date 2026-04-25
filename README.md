@@ -10,7 +10,7 @@
 6. 检查最终结果是否仍与原始需求一致
 7. 最终给客户预览，确认后进入部署阶段
 
-当前仓库仍然是演示版骨架，所以有些节点是真实集成，有些节点还是 mock。这样做的目的是先把整条工作流跑通，再逐步替换成真实模型、真实测试和真实部署。
+当前仓库仍然是演示版骨架，但已经不只是“流程说明”了。现在 UI 确认后，前端、后端和修复 agent 会把代码真正写入独立的任务工作区，再由测试层检查这些生成出来的文件。
 
 ## 仓库结构
 
@@ -33,6 +33,8 @@ npm run dev
 ```
 
 如果你在 `.env` 中配置了 `STITCH_API_KEY` 或 OAuth 相关凭证，流程会优先走真实 Stitch SDK；如果没有配置，则会自动降级到 mock Stitch，但整个流程依然可以本地跑通。
+
+如果你额外配置了 `OPENAI_API_KEY`，`frontend-agent`、`backend-agent`、`fix-agent` 会优先尝试走真实模型生成代码；如果没有配置，也会回退到内置模板生成，但同样会把代码文件写出来。
 
 ## 需求输入方式
 
@@ -96,7 +98,29 @@ npm run dev -- --yes --no-open
 - 正在等待 Stitch 生成 UI
 - UI 下载完成
 - 正在等待你确认是否满意当前设计
+- `frontend-agent` 已写入 2 个代码文件
+- `backend-agent` 已写入 2 个代码文件
+- `fix-agent` 已写入 2 个代码文件
 - 正在等待你确认是否允许发布
+
+## 代码工作区
+
+当 UI 被批准后，系统会为当前任务创建一块独立的代码工作区：
+
+- `artifacts/code-workspace/<jobId>/frontend`
+- `artifacts/code-workspace/<jobId>/backend`
+- `artifacts/code-workspace/<jobId>/tests`
+
+当前版本里：
+
+- `frontend-agent` 会生成前端组件和样式文件
+- `backend-agent` 会生成路由和 schema 文件
+- `fix-agent` 会读取这些文件，并在测试失败后生成修复版改动
+- `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记
+
+也就是说，链路已经从“只出实现计划”升级成了：
+
+`UI 确认 -> 生成前端/后端代码 -> 跑校验 -> 失败则修复代码 -> 复测`
 
 ## UI 版本管理
 
@@ -185,33 +209,31 @@ npm run dev -- --yes --no-open
 - UI 多版本生成与保存
 - UI 满意度确认后再继续开发
 - Stitch SDK 调用与 UI 下载
+- 任务级独立代码工作区
+- 前端/后端代码文件生成与落盘
+- 基于生成文件的测试与修复闭环
 - 最终发布前客户确认
 - 产物落盘到 `artifacts/`
 
 目前还是演示骨架的部分有：
 
-- `frontend-agent`
-- `backend-agent`
-- `test-agent`
-- `fix-agent`
 - `monitor-agent`
 - `acceptance-agent`
 - `deploy-agent`
-- `MockTestRunner`
 - `MockDeployer`
 
 也就是说，当前最成熟的链路是：
 
-`需求 -> spec -> Stitch -> UI 确认 -> 前后端开发骨架 -> 测试/修复 -> 客户确认 -> 部署`
+`需求 -> spec -> Stitch -> UI 确认 -> 前后端代码生成 -> 文件级测试/修复 -> 客户确认 -> 部署`
 
-后面的开发、测试、修复、部署虽然流程已经串起来了，但很多仍然是 mock 逻辑。
+其中部署还是 mock，但开发、测试和修复已经不再只是口头规划，而是会生成和修补实际代码文件。
 
 ## 推荐下一步
 
 如果你准备继续往下做，最值得优先推进的是：
 
 1. 把 `spec-agent` 从“自动澄清”升级成“可交互追问”的 clarify loop
-2. 把 `MockTestRunner` 换成你的真实测试命令
-3. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
-4. 把 job 存储从内存换成 SQLite 或 Postgres
-5. 逐步把各个 agent 从 mock 提示逻辑换成真实模型调用
+2. 把当前文件级测试规则换成你的真实前端/后端测试命令
+3. 把生成代码目录从 `artifacts/code-workspace` 接到真实业务仓库
+4. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
+5. 把 job 存储从内存换成 SQLite 或 Postgres

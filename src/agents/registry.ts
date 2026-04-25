@@ -1,6 +1,7 @@
 // 这个文件集中维护所有 agent 的注册配置。
 // 每个角色的 system prompt、权限范围和工具白名单都在这里定义。
 import type { AgentDefinition, AgentName } from "./base.js";
+import { resolveRuntimeModeForProvider } from "../config/model.js";
 
 // 这个注册表就是 agent 的“配置中心”。
 // orchestrator 会从这里读取每个角色的模型、权限、可访问目录和工具权限。
@@ -42,32 +43,32 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
     description: "Plans frontend implementation for the current feature slice.",
     systemPrompt:
       "You are the frontend agent. Turn the current feature slice and approved UI reference into a frontend implementation plan that preserves the design and user flow.",
-    runtimeMode: "mock",
+    runtimeMode: resolveRuntimeModeForProvider("openai"),
     model: {
       provider: "openai",
       model: "gpt-5.4",
       reasoningEffort: "medium",
       temperature: 0.2,
     },
-    readScopes: ["src", "docs", "artifacts/ui", "skills/dev-agent"],
-    writeScopes: ["src"],
-    tools: ["repo-read", "repo-write"],
+    readScopes: ["docs", "artifacts/ui", "artifacts/specs", "artifacts/code-workspace", "skills/dev-agent"],
+    writeScopes: ["artifacts/code-workspace"],
+    tools: ["repo-read", "repo-write", "repo-writer", "model-client"],
   },
   "backend-agent": {
     name: "backend-agent",
     description: "Plans backend implementation for the current feature slice.",
     systemPrompt:
       "You are the backend agent. Turn the current feature slice into backend responsibilities, contracts, and validation needs without drifting from the approved requirement.",
-    runtimeMode: "mock",
+    runtimeMode: resolveRuntimeModeForProvider("openai"),
     model: {
       provider: "openai",
       model: "gpt-5.4",
       reasoningEffort: "medium",
       temperature: 0.2,
     },
-    readScopes: ["src", "docs", "artifacts/specs", "skills/dev-agent"],
-    writeScopes: ["src"],
-    tools: ["repo-read", "repo-write"],
+    readScopes: ["docs", "artifacts/specs", "artifacts/code-workspace", "skills/dev-agent"],
+    writeScopes: ["artifacts/code-workspace"],
+    tools: ["repo-read", "repo-write", "repo-writer", "model-client"],
   },
   "dev-agent": {
     name: "dev-agent",
@@ -97,7 +98,7 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
       reasoningEffort: "medium",
       temperature: 0.1,
     },
-    readScopes: ["src", "artifacts/test-reports", "skills/test-agent"],
+    readScopes: ["artifacts/code-workspace", "artifacts/test-reports", "skills/test-agent"],
     writeScopes: ["artifacts/test-reports"],
     tools: ["repo-read", "test-runner"],
   },
@@ -106,16 +107,16 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
     description: "Turns bug reports into a targeted repair pass.",
     systemPrompt:
       "You are the fix agent. Focus on the smallest repair that clears the current blocking bugs and returns the feature to the test loop quickly.",
-    runtimeMode: "mock",
+    runtimeMode: resolveRuntimeModeForProvider("openai"),
     model: {
       provider: "openai",
       model: "gpt-5.4",
       reasoningEffort: "medium",
       temperature: 0.2,
     },
-    readScopes: ["src", "artifacts/test-reports", "skills/fix-agent"],
-    writeScopes: ["src"],
-    tools: ["repo-read", "repo-write", "test-runner"],
+    readScopes: ["artifacts/code-workspace", "artifacts/test-reports", "skills/fix-agent"],
+    writeScopes: ["artifacts/code-workspace"],
+    tools: ["repo-read", "repo-write", "repo-writer", "test-runner", "model-client"],
   },
   "monitor-agent": {
     name: "monitor-agent",
@@ -129,7 +130,7 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
       reasoningEffort: "high",
       temperature: 0.1,
     },
-    readScopes: ["src", "docs", "artifacts", "skills/monitor-agent"],
+    readScopes: ["docs", "artifacts", "skills/monitor-agent"],
     writeScopes: [],
     tools: ["repo-read", "job-store"],
   },
@@ -145,7 +146,7 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
       reasoningEffort: "medium",
       temperature: 0.1,
     },
-    readScopes: ["src", "artifacts", "docs", "skills/monitor-agent"],
+    readScopes: ["artifacts", "docs", "skills/monitor-agent"],
     writeScopes: [],
     tools: ["repo-read", "job-store"],
   },
@@ -161,7 +162,7 @@ export const agentRegistry: Record<AgentName, AgentDefinition> = {
       reasoningEffort: "medium",
       temperature: 0.1,
     },
-    readScopes: ["src", "artifacts/build", "artifacts/test-reports", "skills/deploy-agent"],
+    readScopes: ["artifacts/build", "artifacts/test-reports", "artifacts/code-workspace", "skills/deploy-agent"],
     writeScopes: ["artifacts/build"],
     tools: ["repo-read", "job-store", "deployer"],
   },

@@ -29,6 +29,7 @@ export class DeployAgent implements Agent<DeployAgentInput, DeployAgentOutput> {
         : `Deployment is blocked by ${openBugs.length} open bugs.`,
       nextAction: approved ? "deploy_release" : "resolve_release_blockers",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: approved ? [] : [`${openBugs.length} open bugs still block the release.`],
       data: {

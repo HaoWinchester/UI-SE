@@ -31,6 +31,7 @@ export class AcceptanceAgent implements Agent<AcceptanceAgentInput, AcceptanceAg
         : "The workflow is not ready for customer preview yet.",
       nextAction: readyForCustomerReview ? "request_release_approval" : "resolve_acceptance_gaps",
       changedFiles: [],
+      fileEdits: [],
       artifacts: previewPath ? [previewPath] : [],
       risks: [
         ...(previewPath ? [] : ["No preview artifact is available for customer review."]),

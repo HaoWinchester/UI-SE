@@ -31,6 +31,7 @@ export class DevAgent implements Agent<DevAgentInput, DevAgentOutput> {
       summary: `Prepared an implementation plan for "${feature.name}" using the downloaded UI artifact as the visual reference.`,
       nextAction: "run_feature_tests",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: uiArtifactPath ? [] : ["No UI artifact was provided to the development stage."],
       data: {

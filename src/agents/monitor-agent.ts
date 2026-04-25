@@ -52,6 +52,7 @@ export class MonitorAgent implements Agent<MonitorAgentInput, MonitorAgentOutput
         : `Alignment check found gaps: ${findings.join(" ")}`,
       nextAction: aligned ? "run_acceptance_tests" : "investigate_alignment_gap",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: findings,
       data: {

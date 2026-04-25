@@ -39,6 +39,7 @@ export class TestAgent implements Agent<TestAgentInput, TestAgentOutput> {
           ? "repair_feature_with_failure_memory"
           : "repair_feature",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: repeatedFailure
         ? ["The latest failure matches an earlier failure record and should be treated as a repeated issue."]

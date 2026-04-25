@@ -34,6 +34,22 @@ export type FailureMemoryStatus = "open" | "addressed" | "resolved" | "repeated"
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
+// 单个代码文件的写入描述。
+// agent 生成代码时，会先返回这种结构，再由 orchestrator 统一落盘。
+export interface CodeFileEdit {
+  path: string;
+  content: string;
+  description?: string;
+}
+
+// 每个任务都会有一块独立的代码工作区，用来承接前端、后端和测试产物。
+export interface CodeWorkspace {
+  rootDir: string;
+  frontendDir: string;
+  backendDir: string;
+  testsDir: string;
+}
+
 // 单个功能点的定义。
 export interface FeatureSpec {
   id: string;
@@ -46,6 +62,7 @@ export interface FeatureSpec {
   implementationAttempts: number;
   testAttempts: number;
   failureHistory: FailureMemory[];
+  generatedFiles: string[];
 }
 
 // 一份结构化需求，会被拆成多个 feature。
@@ -183,6 +200,7 @@ export interface WorkflowJob {
   id: string;
   requirement: ProductRequirement;
   stage: JobStage;
+  codeWorkspace: CodeWorkspace;
   specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
   uiArtifacts: UiArtifact[];

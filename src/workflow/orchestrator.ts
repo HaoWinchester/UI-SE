@@ -17,8 +17,9 @@ import { TestAgent } from "../agents/test-agent.js";
 import { UiAgent } from "../agents/ui-agent.js";
 import { InMemoryJobStore, type JobStore } from "../storage/job-store.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
+import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../tools/repo-writer.js";
 import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
-import { MockTestRunner, type TestRunner } from "../tools/test-runner.js";
+import { GeneratedWorkspaceTestRunner, type TestRunner } from "../tools/test-runner.js";
 import type {
   AgentRunRecord,
   BugReport,
@@ -76,6 +77,7 @@ interface OrchestratorDependencies {
   deployAgent: DeployAgent;
   stitchClient: StitchClient;
   testRunner: TestRunner;
+  repoWriter: RepoWriter;
   deployer: Deployer;
   baseDir: string;
   onProgress?: (message: string) => void;
@@ -93,6 +95,8 @@ export class DeliveryOrchestrator {
   async createJob(rawRequirement: string): Promise<WorkflowJob> {
     // 新任务创建时，先让 spec-agent 把自然语言需求整理成结构化 requirement。
     const jobId = randomUUID();
+    const codeWorkspace = createCodeWorkspace(jobId);
+    await this.deps.repoWriter.ensureWorkspace(codeWorkspace);
     this.notifyProgress("正在分析原始需求，并生成澄清后的 spec。");
 
     const specExecution = await this.prepareAgentRun(
@@ -108,6 +112,7 @@ export class DeliveryOrchestrator {
     const job: WorkflowJob = {
       id: jobId,
       requirement: specExecution.result.data.requirement,
+      codeWorkspace,
       specArtifact,
       stage: "drafting_spec",
       uiArtifacts: [],
@@ -163,7 +168,7 @@ export class DeliveryOrchestrator {
       "running_flow_tests",
       "Running the workflow test across all completed features.",
     );
-    const flowRun = await this.deps.testRunner.runFlowTests(job.requirement.features);
+    const flowRun = await this.deps.testRunner.runFlowTests(job);
     await this.recordTest(jobId, flowRun);
     if (!flowRun.passed) {
       return this.blockJob(jobId, flowRun.summary);
@@ -373,24 +378,29 @@ export class DeliveryOrchestrator {
     const refreshedFeature = this.requireFeature(job, featureId);
 
     // 前端和后端拆成两个独立 agent，由 orchestrator 串行调度。
-    await this.executeAgent(jobId, "implementing_feature", this.deps.frontendAgent, {
+    const frontendResult = await this.executeAgent(jobId, "implementing_feature", this.deps.frontendAgent, {
       feature: refreshedFeature,
-      uiArtifactPath: job.uiArtifact?.downloadPath ?? "",
+      uiArtifactPath: job.uiArtifact?.htmlPath ?? job.uiArtifact?.imagePath ?? job.uiArtifact?.downloadPath ?? "",
+      codeWorkspace: job.codeWorkspace,
     });
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       frontendStatus: "done",
+      generatedFiles: mergeGeneratedFiles(current.generatedFiles, frontendResult.changedFiles),
       backendStatus: "in_progress",
     }));
 
-    await this.executeAgent(jobId, "implementing_feature", this.deps.backendAgent, {
-      feature: refreshedFeature,
+    const backendFeatureInput = this.requireFeature(await this.deps.store.get(jobId), featureId);
+    const backendResult = await this.executeAgent(jobId, "implementing_feature", this.deps.backendAgent, {
+      feature: backendFeatureInput,
       requirement: job.requirement,
+      codeWorkspace: job.codeWorkspace,
     });
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       backendStatus: "done",
       status: "awaiting_test",
+      generatedFiles: mergeGeneratedFiles(current.generatedFiles, backendResult.changedFiles),
     }));
 
     await this.transition(
@@ -398,7 +408,11 @@ export class DeliveryOrchestrator {
       "testing_feature",
       `Running automated validation for "${refreshedFeature.name}".`,
     );
-    const firstRun = await this.deps.testRunner.runFeatureTests(refreshedFeature);
+    const featureBeforeFirstRun = this.requireFeature(await this.deps.store.get(jobId), featureId);
+    const firstRun = await this.deps.testRunner.runFeatureTests(
+      await this.deps.store.get(jobId),
+      featureBeforeFirstRun,
+    );
     await this.recordTest(jobId, firstRun);
     if (!firstRun.passed) {
       await this.recordFeatureFailure(jobId, featureId, {
@@ -435,11 +449,13 @@ export class DeliveryOrchestrator {
     const fixResult = await this.executeAgent(jobId, "fixing_feature", this.deps.fixAgent, {
       feature: featureAfterFirstFailure,
       bugReports: firstRun.bugs,
+      codeWorkspace: job.codeWorkspace,
     });
     await this.markLatestFailureAddressed(jobId, featureId, fixResult.summary, fixResult.data.repairPlan);
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "awaiting_test",
+      generatedFiles: mergeGeneratedFiles(current.generatedFiles, fixResult.changedFiles),
     }));
 
     await this.transition(
@@ -448,7 +464,10 @@ export class DeliveryOrchestrator {
       `Re-running automated validation for "${refreshedFeature.name}".`,
     );
     const updatedFeature = this.requireFeature(await this.deps.store.get(jobId), featureId);
-    const secondRun = await this.deps.testRunner.runFeatureTests(updatedFeature);
+    const secondRun = await this.deps.testRunner.runFeatureTests(
+      await this.deps.store.get(jobId),
+      updatedFeature,
+    );
     await this.recordTest(jobId, secondRun);
     if (!secondRun.passed) {
       await this.recordFeatureFailure(jobId, featureId, {
@@ -584,6 +603,7 @@ export class DeliveryOrchestrator {
     const result = await agent.run(input, context);
 
     assertPathsWithinScopes(result.changedFiles, context.writeScopes);
+    assertPathsWithinScopes(result.fileEdits.map((edit) => edit.path), context.writeScopes);
 
     return {
       context,
@@ -600,6 +620,12 @@ export class DeliveryOrchestrator {
   ): Promise<AgentResult<Output>> {
     this.notifyProgress(`正在执行 ${agent.definition.name}。`);
     const execution = await this.prepareAgentRun(jobId, stage, agent, input);
+    if (execution.result.fileEdits.length > 0) {
+      const appliedFiles = await this.deps.repoWriter.applyFileEdits(execution.result.fileEdits);
+      if (appliedFiles.length > 0) {
+        this.notifyProgress(`${agent.definition.name} 已写入 ${appliedFiles.length} 个代码文件。`);
+      }
+    }
 
     await this.deps.store.update(jobId, (current) => ({
       ...current,
@@ -938,6 +964,10 @@ function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugRepor
   return [...known.values()];
 }
 
+function mergeGeneratedFiles(existing: string[], incoming: string[]): string[] {
+  return [...new Set([...existing, ...incoming])];
+}
+
 function toBugSignature(bugTitles: string[]): string {
   return [...bugTitles]
     .map((title) => title.trim().toLowerCase())
@@ -962,7 +992,8 @@ export function createDefaultOrchestrator(
     acceptanceAgent: new AcceptanceAgent(),
     deployAgent: new DeployAgent(),
     stitchClient: createStitchClientFromEnv(),
-    testRunner: new MockTestRunner(),
+    testRunner: new GeneratedWorkspaceTestRunner(baseDir),
+    repoWriter: new FileSystemRepoWriter(baseDir),
     deployer: new MockDeployer(baseDir),
     baseDir,
     onProgress: hooks.onProgress,

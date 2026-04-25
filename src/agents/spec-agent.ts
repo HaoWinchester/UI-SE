@@ -58,6 +58,7 @@ export class SpecAgent implements Agent<DraftSpecInput, DraftSpecOutput> {
       summary: `Clarified the incoming request into a spec with ${features.length} feature slices.`,
       nextAction: "review_clarified_spec",
       changedFiles: [],
+      fileEdits: [],
       artifacts: [],
       risks: [
         "Clarifications are currently generated from heuristics and should later be upgraded to a model-backed clarify loop.",
@@ -241,6 +242,7 @@ function createFeature(name: string, index: number): FeatureSpec {
     implementationAttempts: 0,
     testAttempts: 0,
     failureHistory: [],
+    generatedFiles: [],
   };
 }
 
