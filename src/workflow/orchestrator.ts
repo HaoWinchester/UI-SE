@@ -51,6 +51,8 @@ export class DeliveryOrchestrator {
   async createJob(rawRequirement: string): Promise<WorkflowJob> {
     // 新任务创建时，先让 spec-agent 把自然语言需求整理成结构化 requirement。
     const jobId = randomUUID();
+    // prepareAgentRun 只负责执行 agent 并产出结构化记录，
+    // 此时还不会把结果写入 store。
     const specExecution = await this.prepareAgentRun(
       jobId,
       "drafting_spec",
@@ -59,6 +61,7 @@ export class DeliveryOrchestrator {
     );
     const now = specExecution.record.createdAt;
 
+    // 用 spec-agent 的输出组装任务初始状态。
     const job: WorkflowJob = {
       id: jobId,
       requirement: specExecution.result.data.requirement,
@@ -77,6 +80,7 @@ export class DeliveryOrchestrator {
       updatedAt: now,
     };
 
+    // 创建完之后再读一次，是为了拿到 store 中的标准化副本。
     await this.deps.store.create(job);
     return this.deps.store.get(job.id);
   }
@@ -85,10 +89,13 @@ export class DeliveryOrchestrator {
     // 这是主流程入口：从 spec 确认一路推进到 UI 生成、开发、测试、验收和部署。
     await this.transition(jobId, "spec_confirmed", "Spec confirmed and ready for UI generation.");
 
+    // 先读取最新任务状态，把结构化 requirement 交给 ui-agent 组织 Stitch prompt。
     let job = await this.deps.store.get(jobId);
     const uiPreparation = await this.executeAgent(jobId, "spec_confirmed", this.deps.uiAgent, {
       requirement: job.requirement,
     });
+
+    // 真正把 prompt 提交给 Stitch 的动作由工具层完成，而不是 ui-agent 自己操作网站。
     const submission = await this.deps.stitchClient.submit(uiPreparation.data.prompt);
     await this.transition(
       jobId,
@@ -98,11 +105,13 @@ export class DeliveryOrchestrator {
         : `Submitted the approved requirement to Stitch as ${submission.stitchJobId}.`,
     );
 
+    // 提交之后进入轮询下载阶段，拿到图片/HTML 等 UI 产物。
     const uiArtifact = await this.waitForUiArtifact(submission);
     if (uiArtifact.status === "failed") {
       return this.blockJob(jobId, `Stitch job ${submission.stitchJobId} failed before download.`);
     }
 
+    // 下载成功后，把 UI 产物挂到 job 上，后续开发阶段会引用它。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       uiArtifact,
@@ -116,6 +125,7 @@ export class DeliveryOrchestrator {
     job = await this.deps.store.get(jobId);
     // 每个功能点按顺序进入“开发 -> 测试 -> 必要时修复 -> 再测试”的循环。
     for (const feature of job.requirement.features) {
+      // 这里串行处理 feature，便于先把状态机跑顺。
       const result = await this.developFeature(jobId, feature.id);
       if (result.stage === "blocked") {
         return result;
@@ -128,6 +138,7 @@ export class DeliveryOrchestrator {
       "running_flow_tests",
       "Running the workflow test across all completed features.",
     );
+    // flow test 关注的是“所有功能点连起来后的整体流程”。
     const flowRun = await this.deps.testRunner.runFlowTests(job.requirement.features);
     await this.recordTest(jobId, flowRun);
     if (!flowRun.passed) {
@@ -140,6 +151,7 @@ export class DeliveryOrchestrator {
       "verifying_alignment",
       "Checking that the implementation still matches the approved requirement.",
     );
+    // monitor-agent 负责检查当前实现有没有偏离一开始的需求。
     const monitorResult = await this.executeAgent(
       jobId,
       "verifying_alignment",
@@ -156,6 +168,7 @@ export class DeliveryOrchestrator {
       "running_acceptance",
       "Running final acceptance tests before deployment.",
     );
+    // acceptance test 是部署前的最后一层质量闸门。
     const acceptanceRun = await this.deps.testRunner.runAcceptanceTests(job);
     await this.recordTest(jobId, acceptanceRun);
     if (!acceptanceRun.passed) {
@@ -164,6 +177,7 @@ export class DeliveryOrchestrator {
 
     await this.transition(jobId, "deploying", "Preparing deployment approval and release.");
     job = await this.deps.store.get(jobId);
+    // deploy-agent 只负责“允不允许发”，真正部署仍由 deployer 执行。
     const deployDecision = await this.executeAgent(jobId, "deploying", this.deps.deployAgent, {
       job,
     });
@@ -172,6 +186,7 @@ export class DeliveryOrchestrator {
     }
 
     job = await this.deps.store.get(jobId);
+    // 这里才是真正的发布动作，当前 demo 会生成一份部署清单。
     const deployment = await this.deps.deployer.deploy(job, deployDecision.data.environment);
     await this.deps.store.update(jobId, (current) => ({
       ...current,
@@ -187,6 +202,7 @@ export class DeliveryOrchestrator {
     let job = await this.deps.store.get(jobId);
     const feature = this.requireFeature(job, featureId);
 
+    // 先把功能点状态切到开发中，并累计开发尝试次数。
     await this.transition(jobId, "implementing_feature", `Implementing feature "${feature.name}".`);
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
@@ -194,12 +210,15 @@ export class DeliveryOrchestrator {
       implementationAttempts: current.implementationAttempts + 1,
     }));
 
+    // 再读一次最新 job，确保后续看到的是更新后的 feature 和 uiArtifact。
     job = await this.deps.store.get(jobId);
     const refreshedFeature = this.requireFeature(job, featureId);
+    // dev-agent 负责输出当前功能点的实现计划或实现判断。
     await this.executeAgent(jobId, "implementing_feature", this.deps.devAgent, {
       feature: refreshedFeature,
       uiArtifactPath: job.uiArtifact?.downloadPath ?? "",
     });
+    // 开发阶段结束后，把状态切到“等待测试”。
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "awaiting_test",
@@ -210,14 +229,17 @@ export class DeliveryOrchestrator {
       "testing_feature",
       `Running automated validation for "${refreshedFeature.name}".`,
     );
+    // 第一次 feature 测试，先看是否可以直接通过。
     const firstRun = await this.deps.testRunner.runFeatureTests(refreshedFeature);
     await this.recordTest(jobId, firstRun);
+    // test-agent 负责解释测试结果，并告诉 orchestrator 要不要进入修复环节。
     const firstTriage = await this.executeAgent(jobId, "testing_feature", this.deps.testAgent, {
       feature: refreshedFeature,
       testRun: firstRun,
     });
 
     if (!firstTriage.data.shouldFix) {
+      // 不需要修复时，说明这个功能点当前已经完成。
       await this.updateFeature(jobId, featureId, (current) => ({
         ...current,
         status: "done",
@@ -231,15 +253,18 @@ export class DeliveryOrchestrator {
       "fixing_feature",
       `Entering the repair loop for "${refreshedFeature.name}".`,
     );
+    // 进入修复环节后，先把 feature 标记成 fixing。
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "fixing",
     }));
 
+    // 把第一次测试暴露出来的 bug 交给 fix-agent 处理。
     await this.executeAgent(jobId, "fixing_feature", this.deps.fixAgent, {
       feature: refreshedFeature,
       bugReports: firstRun.bugs,
     });
+    // 修完之后重新回到等待测试状态。
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "awaiting_test",
@@ -250,6 +275,7 @@ export class DeliveryOrchestrator {
       "testing_feature",
       `Re-running automated validation for "${refreshedFeature.name}".`,
     );
+    // 第二次测试用于验证 fix loop 是否真的把问题清掉了。
     const updatedFeature = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const secondRun = await this.deps.testRunner.runFeatureTests(updatedFeature);
     await this.recordTest(jobId, secondRun);
@@ -259,6 +285,7 @@ export class DeliveryOrchestrator {
     });
 
     if (secondTriage.data.shouldFix) {
+      // 当前 demo 最多只跑一轮修复；第二次还失败就直接阻塞整个任务。
       await this.updateFeature(jobId, featureId, (current) => ({
         ...current,
         status: "blocked",
@@ -266,6 +293,7 @@ export class DeliveryOrchestrator {
       return this.blockJob(jobId, `Feature "${updatedFeature.name}" still fails after one fix loop.`);
     }
 
+    // 第二次测试通过，则功能点完成，相关 bug 一并关闭。
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "done",
@@ -285,8 +313,10 @@ export class DeliveryOrchestrator {
     // 轮询、下载这类动作仍然属于确定性的工具层工作。
     // agent 只负责决定“什么时候调用它”和“结果如何进入下一步”。
     for (let poll = 0; poll < 5; poll += 1) {
+      // 先轮询 Stitch 状态，只有 completed 才会触发下载。
       const status = await this.deps.stitchClient.getStatus(submission.stitchJobId);
       if (status === "completed") {
+        // 产物会统一下载到 artifacts/ui，方便后续开发和排查。
         const download = await this.deps.stitchClient.downloadResult(
           submission.stitchJobId,
           path.join(this.deps.baseDir, "artifacts", "ui"),
@@ -307,6 +337,7 @@ export class DeliveryOrchestrator {
       }
 
       if (status === "failed") {
+        // 如果外部 UI 生成阶段失败，就把失败状态回传给上层统一处理。
         return {
           stitchJobId: submission.stitchJobId,
           downloadPath: "",
@@ -316,6 +347,7 @@ export class DeliveryOrchestrator {
       }
     }
 
+    // 超过轮询次数仍未完成，则认为这次外部调用超时。
     throw new Error(`Timed out while waiting for Stitch job ${submission.stitchJobId}.`);
   }
 
@@ -350,6 +382,7 @@ export class DeliveryOrchestrator {
     // 这样后面排查流程时可以看到每一步是谁做的、做了什么判断。
     const execution = await this.prepareAgentRun(jobId, stage, agent, input);
 
+    // agent 本次运行完成后，把结构化记录追加到 job.agentRuns 和 job.events。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       agentRuns: [...current.agentRuns, execution.record],
@@ -387,12 +420,14 @@ export class DeliveryOrchestrator {
     // 还会同步更新 bug 列表和对应 feature 的 testAttempts。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
+      // 新 bug 会合并进总表，旧 bug 会按 id 去重。
       bugReports: mergeBugReports(current.bugReports, testRun.bugs),
       testRuns: [...current.testRuns, testRun],
       requirement:
         testRun.scope === "feature" && testRun.targetId
           ? {
               ...current.requirement,
+              // 只有 feature 级测试才会增加某个功能点自己的 testAttempts。
               features: current.requirement.features.map((feature) =>
                 feature.id === testRun.targetId
                   ? {
@@ -424,6 +459,7 @@ export class DeliveryOrchestrator {
       ...current,
       requirement: {
         ...current.requirement,
+        // 只替换目标 feature，其他 feature 保持原样。
         features: current.requirement.features.map((feature) =>
           feature.id === featureId ? updater(feature) : feature,
         ),
@@ -435,6 +471,7 @@ export class DeliveryOrchestrator {
     // 当功能点最终通过时，把该功能相关的历史 bug 一并标记为 fixed。
     await this.deps.store.update(jobId, (current) => ({
       ...current,
+      // 这里只改状态，不删除 bug，方便后面保留问题历史。
       bugReports: current.bugReports.map((bug) =>
         bug.featureId === featureId ? { ...bug, status: "fixed" } : bug,
       ),
