@@ -238,6 +238,7 @@ function createFeature(name: string, index: number): FeatureSpec {
     backendStatus: "pending",
     implementationAttempts: 0,
     testAttempts: 0,
+    failureHistory: [],
   };
 }
 

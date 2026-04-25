@@ -20,6 +20,7 @@ import { MockTestRunner, type TestRunner } from "../tools/test-runner.js";
 import type {
   AgentRunRecord,
   BugReport,
+  FailureMemory,
   FeatureSpec,
   JobStage,
   ReleaseApprovalRecord,
@@ -397,8 +398,16 @@ export class DeliveryOrchestrator {
     );
     const firstRun = await this.deps.testRunner.runFeatureTests(refreshedFeature);
     await this.recordTest(jobId, firstRun);
+    if (!firstRun.passed) {
+      await this.recordFeatureFailure(jobId, featureId, {
+        stage: "testing_feature",
+        step: "feature_test_initial",
+        testRun: firstRun,
+      });
+    }
+    const featureAfterFirstFailure = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const firstTriage = await this.executeAgent(jobId, "testing_feature", this.deps.testAgent, {
-      feature: refreshedFeature,
+      feature: featureAfterFirstFailure,
       testRun: firstRun,
     });
 
@@ -421,10 +430,11 @@ export class DeliveryOrchestrator {
       status: "fixing",
     }));
 
-    await this.executeAgent(jobId, "fixing_feature", this.deps.fixAgent, {
-      feature: refreshedFeature,
+    const fixResult = await this.executeAgent(jobId, "fixing_feature", this.deps.fixAgent, {
+      feature: featureAfterFirstFailure,
       bugReports: firstRun.bugs,
     });
+    await this.markLatestFailureAddressed(jobId, featureId, fixResult.summary, fixResult.data.repairPlan);
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "awaiting_test",
@@ -438,8 +448,16 @@ export class DeliveryOrchestrator {
     const updatedFeature = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const secondRun = await this.deps.testRunner.runFeatureTests(updatedFeature);
     await this.recordTest(jobId, secondRun);
+    if (!secondRun.passed) {
+      await this.recordFeatureFailure(jobId, featureId, {
+        stage: "testing_feature",
+        step: "feature_test_retry",
+        testRun: secondRun,
+      });
+    }
+    const featureAfterSecondFailure = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const secondTriage = await this.executeAgent(jobId, "testing_feature", this.deps.testAgent, {
-      feature: updatedFeature,
+      feature: featureAfterSecondFailure,
       testRun: secondRun,
     });
 
@@ -451,6 +469,11 @@ export class DeliveryOrchestrator {
       return this.blockJob(jobId, `Feature "${updatedFeature.name}" still fails after one fix loop.`);
     }
 
+    await this.resolveFeatureFailures(
+      jobId,
+      featureId,
+      `Feature "${updatedFeature.name}" passed after the repair loop and should not repeat the remembered issue.`,
+    );
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
       status: "done",
@@ -658,6 +681,161 @@ export class DeliveryOrchestrator {
     }));
   }
 
+  // 首轮失败后立即写一条失败记忆，记录失败发生在哪个步骤、返回了什么结果。
+  private async recordFeatureFailure(
+    jobId: string,
+    featureId: string,
+    input: {
+      stage: JobStage;
+      step: string;
+      testRun: TestRun;
+    },
+  ): Promise<void> {
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      requirement: {
+        ...current.requirement,
+        features: current.requirement.features.map((feature) => {
+          if (feature.id !== featureId) {
+            return feature;
+          }
+
+          const bugTitles = input.testRun.bugs.map((bug) => bug.title);
+          const signature = toBugSignature(bugTitles);
+          const alreadySeen = feature.failureHistory.some(
+            (failure) => toBugSignature(failure.bugTitles) === signature,
+          );
+          const failureMemory: FailureMemory = {
+            id: randomUUID(),
+            featureId,
+            stage: input.stage,
+            step: input.step,
+            resultSummary: input.testRun.summary,
+            bugTitles,
+            bugDescriptions: input.testRun.bugs.map((bug) => bug.description),
+            relatedTestRunId: input.testRun.id,
+            status: alreadySeen ? "repeated" : "open",
+            recordedAt: input.testRun.createdAt,
+          };
+
+          return {
+            ...feature,
+            failureHistory: [...feature.failureHistory, failureMemory],
+          };
+        }),
+      },
+      events: [
+        ...current.events,
+        {
+          stage: input.stage,
+          message: `Recorded failure memory for ${featureId} at step "${input.step}": ${input.testRun.summary}`,
+          createdAt: input.testRun.createdAt,
+        },
+      ],
+    }));
+    await this.persistFeatureFailureHistory(jobId, featureId);
+  }
+
+  // 修复计划生成后，把它挂到最新的失败记忆上，便于后续知道“上次试过怎么修”。
+  private async markLatestFailureAddressed(
+    jobId: string,
+    featureId: string,
+    fixSummary: string,
+    repairPlan: string[],
+  ): Promise<void> {
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      requirement: {
+        ...current.requirement,
+        features: current.requirement.features.map((feature) => {
+          if (feature.id !== featureId) {
+            return feature;
+          }
+
+          const latestFailureId = [...feature.failureHistory]
+            .reverse()
+            .find((failure) => failure.status === "open" || failure.status === "repeated")?.id;
+
+          return {
+            ...feature,
+            failureHistory: feature.failureHistory.map((failure) =>
+              failure.id === latestFailureId
+                ? {
+                    ...failure,
+                    fixSummary,
+                    repairPlan,
+                    status: failure.status === "repeated" ? "repeated" : "addressed",
+                  }
+                : failure,
+            ),
+          };
+        }),
+      },
+    }));
+    await this.persistFeatureFailureHistory(jobId, featureId);
+  }
+
+  // 一旦复测通过，就把该功能点尚未关闭的失败记忆都标记为 resolved。
+  private async resolveFeatureFailures(
+    jobId: string,
+    featureId: string,
+    resolutionNote: string,
+  ): Promise<void> {
+    const resolvedAt = new Date().toISOString();
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      requirement: {
+        ...current.requirement,
+        features: current.requirement.features.map((feature) =>
+          feature.id === featureId
+            ? {
+                ...feature,
+                failureHistory: feature.failureHistory.map((failure) =>
+                  failure.status === "resolved"
+                    ? failure
+                    : {
+                        ...failure,
+                        status: "resolved",
+                        resolvedAt,
+                        resolutionNote,
+                      },
+                ),
+              }
+            : feature,
+        ),
+      },
+    }));
+    await this.persistFeatureFailureHistory(jobId, featureId);
+  }
+
+  // 失败记忆除了写入内存状态，也会同步落到 artifacts/test-reports，方便事后追踪。
+  private async persistFeatureFailureHistory(jobId: string, featureId: string): Promise<void> {
+    const job = await this.deps.store.get(jobId);
+    const feature = this.requireFeature(job, featureId);
+    if (feature.failureHistory.length === 0) {
+      return;
+    }
+
+    const artifactDir = path.join(this.deps.baseDir, "artifacts", "test-reports", jobId);
+    await mkdir(artifactDir, { recursive: true });
+
+    const artifactPath = path.join(artifactDir, `${featureId}-failure-memory.json`);
+    await writeFile(
+      artifactPath,
+      JSON.stringify(
+        {
+          jobId,
+          featureId,
+          featureName: feature.name,
+          failureHistory: feature.failureHistory,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
+
   private async updateFeature(
     jobId: string,
     featureId: string,
@@ -756,6 +934,14 @@ function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugRepor
   }
 
   return [...known.values()];
+}
+
+function toBugSignature(bugTitles: string[]): string {
+  return [...bugTitles]
+    .map((title) => title.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join("|");
 }
 
 export function createDefaultOrchestrator(

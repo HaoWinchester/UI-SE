@@ -18,21 +18,52 @@ export class FixAgent implements Agent<FixAgentInput, FixAgentOutput> {
 
   async run({ feature, bugReports }: FixAgentInput): Promise<AgentResult<FixAgentOutput>> {
     const bugTitles = bugReports.map((bug) => bug.title).join("; ");
-    const repairPlan = bugReports.map(
-      (bug, index) => `${index + 1}. Fix issue "${bug.title}" for feature "${feature.name}".`,
-    );
+    const recentFailures = feature.failureHistory.slice(-3);
+    const repairPlan = [
+      ...recentFailures.flatMap((failure, index) => [
+        `${index + 1}. Review failure memory from step "${failure.step}" with result: ${failure.resultSummary}`,
+        `${index + 1}. Avoid repeating remembered issue(s): ${failure.bugTitles.join("; ")}`,
+      ]),
+      ...bugReports.map(
+        (bug, index) =>
+          `${recentFailures.length + index + 1}. Fix issue "${bug.title}" for feature "${feature.name}".`,
+      ),
+    ];
+    const repeatedIssueDetected = hasRepeatedIssue(feature.failureHistory, bugReports.map((bug) => bug.title));
+    const summary = repeatedIssueDetected
+      ? `Prepared a focused fix pass for "${feature.name}" because the same issue appeared again: ${bugTitles}.`
+      : `Prepared a fix pass for "${feature.name}" based on the following issues: ${bugTitles}.`;
 
     return {
       status: "completed",
-      summary: `Prepared a fix pass for "${feature.name}" based on the following issues: ${bugTitles}.`,
+      summary,
       nextAction: "retest_feature",
       changedFiles: [],
       artifacts: [],
-      risks: [],
+      risks: repeatedIssueDetected
+        ? ["This fix pass is handling a repeated issue and should explicitly verify the previous failure memory."]
+        : [],
       data: {
-        summary: `Prepare a fix pass for "${feature.name}" based on the following issues: ${bugTitles}.`,
+        summary,
         repairPlan,
       },
     };
   }
+}
+
+function hasRepeatedIssue(failureHistory: FeatureSpec["failureHistory"], bugTitles: string[]): boolean {
+  const signature = toBugSignature(bugTitles);
+  if (!signature) {
+    return false;
+  }
+
+  return failureHistory.filter((failure) => toBugSignature(failure.bugTitles) === signature).length > 1;
+}
+
+function toBugSignature(bugTitles: string[]): string {
+  return [...bugTitles]
+    .map((title) => title.trim().toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join("|");
 }

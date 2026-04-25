@@ -28,6 +28,7 @@ export type FeatureStatus =
 export type BugStatus = "open" | "fixed";
 export type ReviewStatus = "pending" | "approved" | "rejected";
 export type DeliveryTrackStatus = "pending" | "in_progress" | "done";
+export type FailureMemoryStatus = "open" | "addressed" | "resolved" | "repeated";
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
@@ -42,6 +43,7 @@ export interface FeatureSpec {
   backendStatus: DeliveryTrackStatus;
   implementationAttempts: number;
   testAttempts: number;
+  failureHistory: FailureMemory[];
 }
 
 // 一份结构化需求，会被拆成多个 feature。
@@ -107,6 +109,25 @@ export interface BugReport {
   description: string;
   severity: "low" | "medium" | "high";
   status: BugStatus;
+}
+
+// 失败记忆用于记录“哪一步失败了、返回了什么结果、后来是怎么修的”。
+// 后续再进入测试/修复时，会把这份记录带上，避免重复踩同一个坑。
+export interface FailureMemory {
+  id: string;
+  featureId: string;
+  stage: JobStage;
+  step: string;
+  resultSummary: string;
+  bugTitles: string[];
+  bugDescriptions: string[];
+  relatedTestRunId?: string;
+  fixSummary?: string;
+  repairPlan?: string[];
+  status: FailureMemoryStatus;
+  recordedAt: string;
+  resolvedAt?: string;
+  resolutionNote?: string;
 }
 
 // 一次测试执行的结果。
