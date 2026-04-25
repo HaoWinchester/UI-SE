@@ -15,6 +15,7 @@ Build a delivery workflow for an AI-assisted product team.
 
 interface CliOptions {
   requirementFilePath?: string;
+  inlinePrompt?: string;
   showHelp: boolean;
 }
 
@@ -47,6 +48,8 @@ async function main(): Promise<void> {
   console.log(`Requirement source: ${requirementInput.sourceLabel}`);
   console.log(`Job: ${result.id}`);
   console.log(`Stage: ${result.stage}`);
+  console.log(`Spec: ${result.specArtifact?.markdownPath ?? "none"}`);
+  console.log(`Clarifications: ${result.requirement.clarifications.length}`);
   console.log(`Features: ${result.requirement.features.length}`);
   console.log(`Agent runs: ${result.agentRuns.length}`);
   console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
@@ -60,6 +63,7 @@ async function main(): Promise<void> {
 }
 
 // 解析命令行参数，当前支持：
+// `--prompt "一句话需求"`
 // `--file path/to/requirement.md`
 // `--help`
 function parseCliArgs(args: string[], workspaceRoot: string): CliOptions {
@@ -86,6 +90,23 @@ function parseCliArgs(args: string[], workspaceRoot: string): CliOptions {
       continue;
     }
 
+    if (arg === "--prompt") {
+      const prompt = args[index + 1];
+      if (!prompt || prompt.startsWith("-")) {
+        throw new Error('Missing value for --prompt. Example: npm run dev -- --prompt "Build a dashboard"');
+      }
+
+      options.inlinePrompt = prompt.trim();
+      index += 1;
+      continue;
+    }
+
+    // 允许把一句话需求直接作为位置参数传进来，方便演示时快速输入。
+    if (!arg.startsWith("-")) {
+      options.inlinePrompt = args.slice(index).join(" ").trim();
+      break;
+    }
+
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -93,13 +114,21 @@ function parseCliArgs(args: string[], workspaceRoot: string): CliOptions {
 }
 
 // 读取需求输入：
-// 1. 先读 --file
-// 2. 再读项目根目录下默认的 requirement.md
-// 3. 最后才回退到内置演示需求
+// 1. 先读一句话 prompt
+// 2. 再读 --file
+// 3. 再读项目根目录下默认的 requirement.md
+// 4. 最后才回退到内置演示需求
 async function loadRequirementInput(
   cliOptions: CliOptions,
   workspaceRoot: string,
 ): Promise<RequirementInput> {
+  if (cliOptions.inlinePrompt) {
+    return {
+      rawRequirement: cliOptions.inlinePrompt,
+      sourceLabel: "inline prompt",
+    };
+  }
+
   if (cliOptions.requirementFilePath) {
     return {
       rawRequirement: await readRequirementFile(cliOptions.requirementFilePath),
@@ -148,12 +177,15 @@ function isMissingFileError(error: unknown): boolean {
 function printHelp(): void {
   console.log("Usage:");
   console.log("  npm run dev");
+  console.log('  npm run dev -- --prompt "Build a project dashboard"');
+  console.log('  npm run dev -- "Build a project dashboard"');
   console.log("  npm run dev -- --file ./requirement.md");
   console.log("");
   console.log("Behavior:");
-  console.log("  1. Read the file passed through --file when provided.");
-  console.log(`  2. Otherwise read ${DEFAULT_REQUIREMENT_FILE} from the project root when it exists.`);
-  console.log("  3. Finally fall back to the built-in demo requirement when no file exists.");
+  console.log("  1. Read the inline prompt when provided.");
+  console.log("  2. Otherwise read the file passed through --file.");
+  console.log(`  3. Otherwise read ${DEFAULT_REQUIREMENT_FILE} from the project root when it exists.`);
+  console.log("  4. Finally fall back to the built-in demo requirement when no file exists.");
 }
 
 // 统一兜底错误，避免异常直接静默退出。

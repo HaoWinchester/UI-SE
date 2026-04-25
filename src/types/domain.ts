@@ -44,8 +44,26 @@ export interface ProductRequirement {
   title: string;
   summary: string;
   rawInput: string;
+  userScenarios: string[];
   acceptanceCriteria: string[];
+  successCriteria: string[];
+  assumptions: string[];
+  clarifications: RequirementClarification[];
   features: FeatureSpec[];
+}
+
+// 记录一次“需求澄清”的结果，说明我们补了什么默认值或决定。
+export interface RequirementClarification {
+  topic: string;
+  answer: string;
+  rationale: string;
+}
+
+// 澄清后的 spec 产物，后续 UI 生成会优先消费它。
+export interface SpecArtifact {
+  markdownPath: string;
+  markdown: string;
+  clarifiedAt: string;
 }
 
 // Stitch 生成出来的 UI 产物信息。
@@ -123,6 +141,7 @@ export interface WorkflowJob {
   id: string;
   requirement: ProductRequirement;
   stage: JobStage;
+  specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
   bugReports: BugReport[];
   testRuns: TestRun[];

@@ -33,14 +33,20 @@ npm run dev
 
 If `STITCH_API_KEY` or OAuth credentials are configured in `.env`, the workflow uses the real Stitch SDK. Otherwise it automatically falls back to the mock Stitch client so the rest of the flow still runs locally.
 
-The demo entrypoint now reads the requirement from `requirement.md` by default, runs it through the orchestration flow, and writes UI artifacts under `artifacts/`.
+The demo entrypoint now supports a one-line prompt, auto-clarifies it into a Speckit-style spec, then sends that clarified spec into the UI orchestration flow and writes outputs under `artifacts/`.
 
 ## Requirement input
 
 Use one of these ways to submit a requirement:
 
 ```bash
-# Recommended for demos: edit the project-root requirement.md, then run
+# Fastest demo path: pass one sentence directly
+npm run dev -- --prompt "Build a project delivery dashboard for an AI team"
+
+# Or use a positional sentence
+npm run dev -- "Build a project delivery dashboard for an AI team"
+
+# Or edit the project-root requirement.md, then run
 npm run dev
 
 # Or point to a different markdown file
@@ -52,9 +58,30 @@ npm run dev -- --help
 
 Input priority:
 
-1. `--file path/to/requirement.md`
-2. project-root `requirement.md`
-3. built-in fallback demo requirement
+1. inline prompt (`--prompt "..."` or positional sentence)
+2. `--file path/to/requirement.md`
+3. project-root `requirement.md`
+4. built-in fallback demo requirement
+
+## Speckit-style clarification flow
+
+The first step is no longer "send the raw sentence to Stitch".
+
+Instead the runtime now does this:
+
+1. accept a one-line requirement or markdown requirement file
+2. run `spec-agent` to turn it into a clarified, structured spec
+3. persist that clarified spec to `artifacts/specs`
+4. use the clarified spec as the grounding input for `ui-agent`
+5. send the resulting prompt to Stitch
+
+This makes the UI generation step more stable because Stitch receives a clearer specification with:
+
+- clarified scope
+- user scenarios
+- feature slices
+- success criteria
+- explicit assumptions
 
 ## Stitch setup
 

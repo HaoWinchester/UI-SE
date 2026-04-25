@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Agent, AgentDefinition, AgentExecutionContext, AgentResult } from "../agents/base.js";
@@ -6,7 +7,6 @@ import { createExecutionContext } from "../agents/base.js";
 import { DeployAgent } from "../agents/deploy-agent.js";
 import { DevAgent } from "../agents/dev-agent.js";
 import { FixAgent } from "../agents/fix-agent.js";
-import type { DraftSpecInput, DraftSpecOutput } from "../agents/spec-agent.js";
 import { MonitorAgent } from "../agents/monitor-agent.js";
 import { SpecAgent } from "../agents/spec-agent.js";
 import { TestAgent } from "../agents/test-agent.js";
@@ -20,6 +20,7 @@ import type {
   BugReport,
   FeatureSpec,
   JobStage,
+  SpecArtifact,
   TestRun,
   UiArtifact,
   WorkflowJob,
@@ -60,15 +61,22 @@ export class DeliveryOrchestrator {
       { rawRequirement },
     );
     const now = specExecution.record.createdAt;
+    const specArtifact = await this.persistSpecArtifact(jobId, specExecution.result.data.specMarkdown);
 
     // 用 spec-agent 的输出组装任务初始状态。
     const job: WorkflowJob = {
       id: jobId,
       requirement: specExecution.result.data.requirement,
+      specArtifact,
       stage: "drafting_spec",
       bugReports: [],
       testRuns: [],
-      agentRuns: [specExecution.record],
+      agentRuns: [
+        {
+          ...specExecution.record,
+          artifacts: [...specExecution.record.artifacts, specArtifact.markdownPath],
+        },
+      ],
       events: [
         {
           stage: "drafting_spec",
@@ -87,12 +95,20 @@ export class DeliveryOrchestrator {
 
   async run(jobId: string): Promise<WorkflowJob> {
     // 这是主流程入口：从 spec 确认一路推进到 UI 生成、开发、测试、验收和部署。
-    await this.transition(jobId, "spec_confirmed", "Spec confirmed and ready for UI generation.");
+    const initialJob = await this.deps.store.get(jobId);
+    await this.transition(
+      jobId,
+      "spec_confirmed",
+      initialJob.specArtifact
+        ? `Clarified spec saved to ${initialJob.specArtifact.markdownPath} and ready for UI generation.`
+        : "Spec confirmed and ready for UI generation.",
+    );
 
     // 先读取最新任务状态，把结构化 requirement 交给 ui-agent 组织 Stitch prompt。
     let job = await this.deps.store.get(jobId);
     const uiPreparation = await this.executeAgent(jobId, "spec_confirmed", this.deps.uiAgent, {
       requirement: job.requirement,
+      specArtifact: job.specArtifact,
     });
 
     // 真正把 prompt 提交给 Stitch 的动作由工具层完成，而不是 ui-agent 自己操作网站。
@@ -195,6 +211,22 @@ export class DeliveryOrchestrator {
 
     await this.transition(jobId, "done", `Deployment completed in ${deployment.environment}.`);
     return this.deps.store.get(jobId);
+  }
+
+  // 把澄清后的 spec 落到 artifacts/specs，方便人工查看，也方便后续 agent 复用。
+  private async persistSpecArtifact(jobId: string, specMarkdown: string): Promise<SpecArtifact> {
+    const clarifiedAt = new Date().toISOString();
+    const artifactDir = path.join(this.deps.baseDir, "artifacts", "specs");
+    await mkdir(artifactDir, { recursive: true });
+
+    const markdownPath = path.join(artifactDir, `spec-${jobId}.md`);
+    await writeFile(markdownPath, specMarkdown, "utf8");
+
+    return {
+      markdownPath,
+      markdown: specMarkdown,
+      clarifiedAt,
+    };
   }
 
   private async developFeature(jobId: string, featureId: string): Promise<WorkflowJob> {
