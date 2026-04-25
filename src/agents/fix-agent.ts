@@ -194,9 +194,10 @@ function buildTemplateFixEdits(
     }
 
     let nextContent = snapshot.content;
+    const repairCommentPrefix = snapshot.path.endsWith(".sql") ? "--" : "//";
     nextContent = nextContent.replace(
       /^.*TODO:.*$/gm,
-      `// 修复说明：已根据当前 bug 列表完成补齐，避免重复出现问题：${fixSummary}`,
+      `${repairCommentPrefix} 修复说明：已根据当前 bug 列表完成补齐，避免重复出现问题：${fixSummary}`,
     );
 
     if (snapshot.path.endsWith("FeatureView.tsx") && !nextContent.includes('data-implementation-ready="true"')) {

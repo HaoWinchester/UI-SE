@@ -33,6 +33,8 @@ export type DeliveryTrackStatus = "pending" | "in_progress" | "done";
 export type FailureMemoryStatus = "open" | "addressed" | "resolved" | "repeated";
 export type WorkflowLogLevel = "info" | "warn" | "error";
 export type AlignmentLayer = "ui" | "frontend" | "backend" | "database" | "workflow";
+export type DatabaseRunStatus = "applied" | "failed";
+export type DatabaseRunMode = "existing_database" | "docker_container";
 
 export type TestScope = "feature" | "flow" | "acceptance";
 
@@ -185,6 +187,30 @@ export interface AlignmentReportArtifact {
   autoFixSummary?: string;
 }
 
+// 每次把 migration/seed 真正执行到 PostgreSQL 后，都会留下一条数据库执行记录。
+export interface DatabaseRunRecord {
+  id: string;
+  featureId: string;
+  status: DatabaseRunStatus;
+  mode: DatabaseRunMode;
+  databaseUrl: string;
+  databaseName: string;
+  containerName?: string;
+  migrationPath: string;
+  seedScriptPath: string;
+  seedSqlPath: string;
+  logPath: string;
+  summary: string;
+  executedAt: string;
+  durationMs: number;
+}
+
+// 网页面板是给人查看工作流状态的静态 HTML 产物。
+export interface DashboardArtifact {
+  htmlPath: string;
+  generatedAt: string;
+}
+
 // 一次测试执行的结果。
 export interface TestRun {
   id: string;
@@ -238,10 +264,12 @@ export interface WorkflowJob {
   stage: JobStage;
   codeWorkspace: CodeWorkspace;
   logFilePath: string;
+  dashboardArtifact?: DashboardArtifact;
   specArtifact?: SpecArtifact;
   uiArtifact?: UiArtifact;
   uiArtifacts: UiArtifact[];
   alignmentReports: AlignmentReportArtifact[];
+  databaseRuns: DatabaseRunRecord[];
   bugReports: BugReport[];
   testRuns: TestRun[];
   agentRuns: AgentRunRecord[];

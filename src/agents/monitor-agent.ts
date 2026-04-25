@@ -87,6 +87,16 @@ export class MonitorAgent implements Agent<MonitorAgentInput, MonitorAgentOutput
       });
     }
 
+    const failedDatabaseRuns = job.databaseRuns.filter((databaseRun) => databaseRun.status !== "applied");
+    if (failedDatabaseRuns.length > 0) {
+      addFinding(structuredFindings, {
+        layer: "database",
+        message: `${failedDatabaseRuns.length} database execution runs are still failing.`,
+        severity: "blocking",
+        rule: "job_database_runs_applied",
+      });
+    }
+
     findings.push(...structuredFindings.map((finding) => finding.message));
     const aligned = findings.length === 0;
 
@@ -133,6 +143,7 @@ async function evaluateFeatureAlignment(
     paths.prismaSchemaPath,
     paths.prismaMigrationPath,
     paths.prismaSeedPath,
+    paths.prismaSeedSqlPath,
   ];
 
   if (!job.uiArtifact || job.uiArtifact.reviewStatus !== "approved") {
@@ -256,6 +267,31 @@ async function evaluateFeatureAlignment(
       severity: "blocking",
       filePath: paths.prismaSeedPath,
       rule: "seed_delegate_usage",
+    });
+  }
+
+  const seedSqlContent = await readGeneratedFile(workspaceRoot, paths.prismaSeedSqlPath);
+  if (seedSqlContent && !seedSqlContent.includes(`INSERT INTO "${prismaNames.tableName}"`)) {
+    addFinding(structuredFindings, {
+      layer: "database",
+      message: `Seed SQL ${paths.prismaSeedSqlPath} is not inserting into table ${prismaNames.tableName}.`,
+      severity: "blocking",
+      filePath: paths.prismaSeedSqlPath,
+      rule: "seed_sql_table_reference",
+    });
+  }
+
+  const latestDatabaseRun = [...job.databaseRuns]
+    .reverse()
+    .find((databaseRun) => databaseRun.featureId === feature.id);
+  if (!latestDatabaseRun || latestDatabaseRun.status !== "applied") {
+    addFinding(structuredFindings, {
+      layer: "database",
+      message: latestDatabaseRun
+        ? `Latest database execution for ${feature.id} failed: ${latestDatabaseRun.summary}`
+        : `No PostgreSQL execution record exists for feature ${feature.id}.`,
+      severity: "blocking",
+      rule: "database_execution_applied",
     });
   }
 

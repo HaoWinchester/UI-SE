@@ -56,6 +56,7 @@ export class DbAgent implements Agent<DbAgentInput, DbAgentOutput> {
       prismaSchemaPath: paths.prismaSchemaPath,
       prismaMigrationPath: paths.prismaMigrationPath,
       prismaSeedPath: paths.prismaSeedPath,
+      prismaSeedSqlPath: paths.prismaSeedSqlPath,
       backendSchemaPath: paths.backendSchemaPath,
       prismaNames,
       requestTypeName,
@@ -83,12 +84,13 @@ export class DbAgent implements Agent<DbAgentInput, DbAgentOutput> {
           paths.prismaSchemaPath,
           paths.prismaMigrationPath,
           paths.prismaSeedPath,
+          paths.prismaSeedSqlPath,
         ])
       : fallbackFileEdits;
 
     const implementationPlan = modelPayload?.implementationPlan ?? [
       `为 "${feature.name}" 设计 Prisma 数据模型和 PostgreSQL 表结构。`,
-      "生成 migration、seed 和 repository，让后端接口可以连接真实数据层。",
+      "生成 migration、seed、可执行 SQL seed 和 repository，让后端接口可以连接真实数据层。",
       "保留一条明确的 TODO 给修复环节验证数据库代码也能被自动修复。",
     ];
 
@@ -141,7 +143,7 @@ async function tryGenerateDatabaseWithModel(input: {
         `Prisma model name: ${input.prismaNames.modelName}`,
         `Prisma delegate name: ${input.prismaNames.delegateName}`,
         `PostgreSQL table name: ${input.prismaNames.tableName}`,
-        `Write database files: ${input.paths.databaseRepositoryPath}, ${input.paths.prismaSchemaPath}, ${input.paths.prismaMigrationPath}, ${input.paths.prismaSeedPath}.`,
+        `Write database files: ${input.paths.databaseRepositoryPath}, ${input.paths.prismaSchemaPath}, ${input.paths.prismaMigrationPath}, ${input.paths.prismaSeedPath}, ${input.paths.prismaSeedSqlPath}.`,
         `The repository should consume ${input.requestTypeName} from the backend schema.`,
         input.existingSchema
           ? `Existing schema.prisma content:\n${input.existingSchema}`
@@ -172,6 +174,7 @@ function buildTemplateDatabaseEdits(input: {
   prismaSchemaPath: string;
   prismaMigrationPath: string;
   prismaSeedPath: string;
+  prismaSeedSqlPath: string;
   backendSchemaPath: string;
   requestTypeName: string;
   prismaNames: ReturnType<typeof getPrismaFeatureNames>;
@@ -265,6 +268,18 @@ function buildTemplateDatabaseEdits(input: {
     "",
   ].join("\n");
 
+  const seedSqlContent = [
+    `-- Seed for feature: ${input.feature.name}`,
+    `INSERT INTO "${input.prismaNames.tableName}" ("id", "title", "status", "actions")`,
+    `VALUES ('${escapeSqlLiteral(`${input.feature.id}-seed`)}', '${escapeSqlLiteral(`${input.feature.name} demo record`)}', 'ready', 'review,confirm')`,
+    'ON CONFLICT ("id") DO UPDATE SET',
+    '  "title" = EXCLUDED."title",',
+    '  "status" = EXCLUDED."status",',
+    '  "actions" = EXCLUDED."actions",',
+    '  "updatedAt" = CURRENT_TIMESTAMP;',
+    "",
+  ].join("\n");
+
   return [
     {
       path: input.repositoryPath,
@@ -285,6 +300,11 @@ function buildTemplateDatabaseEdits(input: {
       path: input.prismaSeedPath,
       content: seedContent,
       description: `Generated Prisma seed for "${input.feature.name}"`,
+    },
+    {
+      path: input.prismaSeedSqlPath,
+      content: seedSqlContent,
+      description: `Generated executable SQL seed for "${input.feature.name}"`,
     },
   ];
 }
@@ -366,4 +386,8 @@ function toTemplateText(value: string): string {
     .replace(/"/g, '\\"')
     .replace(/\r?\n/g, " ")
     .trim();
+}
+
+function escapeSqlLiteral(value: string): string {
+  return value.replaceAll("'", "''");
 }

@@ -14,6 +14,7 @@ export interface FeatureCodePaths {
   prismaSchemaPath: string;
   prismaMigrationPath: string;
   prismaSeedPath: string;
+  prismaSeedSqlPath: string;
 }
 
 export function getFeatureCodePaths(
@@ -36,6 +37,7 @@ export function getFeatureCodePaths(
     prismaSchemaPath: path.posix.join(prismaDir, "schema.prisma"),
     prismaMigrationPath: path.posix.join(prismaDir, "migrations", `${featureSlug}_init`, "migration.sql"),
     prismaSeedPath: path.posix.join(prismaDir, "seeds", `${featureSlug}.ts`),
+    prismaSeedSqlPath: path.posix.join(prismaDir, "seeds", `${featureSlug}.sql`),
   };
 }
 

@@ -17,6 +17,8 @@ import { SpecAgent } from "../agents/spec-agent.js";
 import { TestAgent } from "../agents/test-agent.js";
 import { UiAgent } from "../agents/ui-agent.js";
 import { InMemoryJobStore, type JobStore } from "../storage/job-store.js";
+import { StaticHtmlDashboardBuilder, type DashboardBuilder } from "../tools/dashboard-builder.js";
+import { PostgresDatabaseRunner, type DatabaseRunner } from "../tools/database-runner.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
 import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../tools/repo-writer.js";
 import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
@@ -26,6 +28,7 @@ import type {
   AlignmentReportArtifact,
   AgentRunRecord,
   BugReport,
+  DatabaseRunRecord,
   FailureMemory,
   FeatureSpec,
   JobStage,
@@ -84,6 +87,8 @@ interface OrchestratorDependencies {
   testRunner: TestRunner;
   repoWriter: RepoWriter;
   deployer: Deployer;
+  databaseRunner: DatabaseRunner;
+  dashboardBuilder: DashboardBuilder;
   baseDir: string;
   onProgress?: (message: string) => void;
   requestUiApproval?: (request: UiApprovalRequest) => Promise<UiApprovalDecision>;
@@ -124,6 +129,7 @@ export class DeliveryOrchestrator {
       stage: "drafting_spec",
       uiArtifacts: [],
       alignmentReports: [],
+      databaseRuns: [],
       bugReports: [],
       testRuns: [],
       agentRuns: [
@@ -153,6 +159,7 @@ export class DeliveryOrchestrator {
         specPath: specArtifact.markdownPath,
       },
     });
+    await this.refreshDashboard(jobId);
     return this.deps.store.get(job.id);
   }
 
@@ -443,6 +450,10 @@ export class DeliveryOrchestrator {
       status: "awaiting_test",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, dbResult.changedFiles),
     }));
+    const initialDatabaseRun = await this.applyDatabaseArtifacts(jobId, featureId);
+    if (initialDatabaseRun?.status === "failed") {
+      return this.blockJob(jobId, initialDatabaseRun.summary);
+    }
 
     await this.transition(
       jobId,
@@ -498,6 +509,10 @@ export class DeliveryOrchestrator {
       status: "awaiting_test",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, fixResult.changedFiles),
     }));
+    const repairedDatabaseRun = await this.applyDatabaseArtifacts(jobId, featureId, fixResult.changedFiles);
+    if (repairedDatabaseRun?.status === "failed") {
+      return this.blockJob(jobId, repairedDatabaseRun.summary);
+    }
 
     await this.transition(
       jobId,
@@ -679,6 +694,7 @@ export class DeliveryOrchestrator {
       ...current,
       uiArtifacts: [...current.uiArtifacts, uiArtifact],
     }));
+    await this.refreshDashboard(jobId);
   }
 
   private async setApprovedUiArtifact(jobId: string, approvedArtifact: UiArtifact): Promise<void> {
@@ -689,6 +705,7 @@ export class DeliveryOrchestrator {
         artifact.versionNumber === approvedArtifact.versionNumber ? approvedArtifact : artifact,
       ),
     }));
+    await this.refreshDashboard(jobId);
   }
 
   private async updateUiArtifact(
@@ -702,6 +719,7 @@ export class DeliveryOrchestrator {
         artifact.versionNumber === versionNumber ? updater(artifact) : artifact,
       ),
     }));
+    await this.refreshDashboard(jobId);
   }
 
   private async prepareAgentRun<Input, Output>(
@@ -761,6 +779,7 @@ export class DeliveryOrchestrator {
         risks: execution.result.risks,
       },
     });
+    await this.refreshDashboard(jobId);
 
     return execution.result;
   }
@@ -785,6 +804,7 @@ export class DeliveryOrchestrator {
       stage,
       message,
     });
+    await this.refreshDashboard(jobId);
   }
 
   private async recordTest(jobId: string, testRun: TestRun): Promise<void> {
@@ -826,6 +846,7 @@ export class DeliveryOrchestrator {
         bugCount: testRun.bugs.length,
       },
     });
+    await this.refreshDashboard(jobId);
   }
 
   private async recordReleaseApproval(
@@ -858,6 +879,7 @@ export class DeliveryOrchestrator {
         previewPath: releaseApproval.previewPath,
       },
     });
+    await this.refreshDashboard(jobId);
   }
 
   // 首轮失败后立即写一条失败记忆，记录失败发生在哪个步骤、返回了什么结果。
@@ -923,6 +945,7 @@ export class DeliveryOrchestrator {
         bugTitles: input.testRun.bugs.map((bug) => bug.title),
       },
     });
+    await this.refreshDashboard(jobId);
   }
 
   // 修复计划生成后，把它挂到最新的失败记忆上，便于后续知道“上次试过怎么修”。
@@ -1080,8 +1103,29 @@ export class DeliveryOrchestrator {
         attemptedAutoFix: input.attemptedAutoFix,
       },
     });
+    await this.refreshDashboard(jobId);
 
     return report;
+  }
+
+  // 数据库文件生成完成后，会在这里真正执行 migration 和 seed。
+  // 如果 fix-agent 又改了数据库相关文件，也会重新执行一次，确保 PostgreSQL 里的状态和代码一致。
+  private async applyDatabaseArtifacts(
+    jobId: string,
+    featureId: string,
+    changedFiles?: string[],
+  ): Promise<DatabaseRunRecord | undefined> {
+    if (changedFiles && !this.shouldReapplyDatabase(changedFiles)) {
+      return undefined;
+    }
+
+    const job = await this.deps.store.get(jobId);
+    const feature = this.requireFeature(job, featureId);
+    this.notifyProgress(`正在将 ${feature.name} 的 migration/seed 执行到 PostgreSQL。`);
+
+    const databaseRun = await this.deps.databaseRunner.applyFeatureArtifacts(job, feature);
+    await this.persistDatabaseRun(jobId, databaseRun);
+    return databaseRun;
   }
 
   // 偏航发现后，先把结果转换成 bug 语义，再交给 fix-agent 做定向修复。
@@ -1130,9 +1174,43 @@ export class DeliveryOrchestrator {
       status: "done",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, fixResult.changedFiles),
     }));
+    const repairedDatabaseRun = await this.applyDatabaseArtifacts(jobId, feature.id, fixResult.changedFiles);
+    if (repairedDatabaseRun?.status === "failed") {
+      return `${fixResult.summary} ${repairedDatabaseRun.summary}`;
+    }
     await this.markSpecificBugsFixed(jobId, driftBugReports.map((bug) => bug.id));
 
     return fixResult.summary;
+  }
+
+  private async persistDatabaseRun(jobId: string, databaseRun: DatabaseRunRecord): Promise<void> {
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      databaseRuns: [...current.databaseRuns, databaseRun],
+      events: [
+        ...current.events,
+        {
+          stage: current.stage,
+          message: `Database run (${databaseRun.status}): ${databaseRun.summary}`,
+          createdAt: databaseRun.executedAt,
+        },
+      ],
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: databaseRun.executedAt,
+      level: databaseRun.status === "applied" ? "info" : "error",
+      stage: "implementing_feature",
+      message: `Database run (${databaseRun.status}): ${databaseRun.summary}`,
+      details: {
+        featureId: databaseRun.featureId,
+        databaseUrl: databaseRun.databaseUrl,
+        databaseName: databaseRun.databaseName,
+        mode: databaseRun.mode,
+        containerName: databaseRun.containerName,
+        logPath: databaseRun.logPath,
+      },
+    });
+    await this.refreshDashboard(jobId);
   }
 
   private async updateFeature(
@@ -1175,10 +1253,28 @@ export class DeliveryOrchestrator {
     return this.deps.store.get(jobId);
   }
 
+  private shouldReapplyDatabase(changedFiles: string[]): boolean {
+    return changedFiles.some(
+      (filePath) =>
+        filePath.includes("/database/") ||
+        filePath.endsWith(".prisma") ||
+        filePath.endsWith(".sql"),
+    );
+  }
+
   private async persistWorkflowLog(jobId: string, entry: WorkflowLogEntry): Promise<void> {
     const logFilePath = path.join(this.deps.baseDir, getWorkflowLogFilePath(jobId));
     await mkdir(path.dirname(logFilePath), { recursive: true });
     await appendFile(logFilePath, `${JSON.stringify(entry)}\n`, "utf8");
+  }
+
+  private async refreshDashboard(jobId: string): Promise<void> {
+    const job = await this.deps.store.get(jobId);
+    const dashboardArtifact = await this.deps.dashboardBuilder.render(job);
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      dashboardArtifact,
+    }));
   }
 
   private requireFeature(job: WorkflowJob, featureId: string): FeatureSpec {
@@ -1287,6 +1383,8 @@ export function createDefaultOrchestrator(
     testRunner: new GeneratedWorkspaceTestRunner(baseDir),
     repoWriter: new FileSystemRepoWriter(baseDir),
     deployer: new MockDeployer(baseDir),
+    databaseRunner: new PostgresDatabaseRunner(baseDir),
+    dashboardBuilder: new StaticHtmlDashboardBuilder(baseDir),
     baseDir,
     onProgress: hooks.onProgress,
     requestUiApproval: hooks.requestUiApproval,

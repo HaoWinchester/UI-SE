@@ -30,6 +30,7 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
       paths.prismaSchemaPath,
       paths.prismaMigrationPath,
       paths.prismaSeedPath,
+      paths.prismaSeedSqlPath,
     ];
     const prismaNames = getPrismaFeatureNames(paths.featureSlug);
 
@@ -168,6 +169,32 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
       );
     }
 
+    const seedSqlContent = await this.readGeneratedFile(paths.prismaSeedSqlPath);
+    if (seedSqlContent && !seedSqlContent.includes("INSERT INTO")) {
+      bugs.push(
+        createBug(
+          feature.id,
+          "SQL seed is missing insert logic",
+          `The generated SQL seed at ${paths.prismaSeedSqlPath} does not include an INSERT statement.`,
+        ),
+      );
+    }
+
+    const latestDatabaseRun = [...job.databaseRuns]
+      .reverse()
+      .find((databaseRun) => databaseRun.featureId === feature.id);
+    if (!latestDatabaseRun || latestDatabaseRun.status !== "applied") {
+      bugs.push(
+        createBug(
+          feature.id,
+          "Database artifacts were not applied to PostgreSQL",
+          latestDatabaseRun
+            ? `The latest database run for ${feature.id} failed: ${latestDatabaseRun.summary}`
+            : `No database execution record was found for feature ${feature.id}.`,
+        ),
+      );
+    }
+
     const passed = bugs.length === 0;
     return {
       id: randomUUID(),
@@ -184,16 +211,17 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
 
   async runFlowTests(job: WorkflowJob): Promise<TestRun> {
     const unfinished = job.requirement.features.filter((feature) => feature.status !== "done");
-    const missingArtifacts = job.requirement.features.filter((feature) => feature.generatedFiles.length < 8);
+    const missingArtifacts = job.requirement.features.filter((feature) => feature.generatedFiles.length < 9);
+    const failedDatabaseRuns = job.databaseRuns.filter((databaseRun) => databaseRun.status !== "applied");
 
     return {
       id: randomUUID(),
       scope: "flow",
-      passed: unfinished.length === 0 && missingArtifacts.length === 0,
+      passed: unfinished.length === 0 && missingArtifacts.length === 0 && failedDatabaseRuns.length === 0,
       summary:
-        unfinished.length === 0 && missingArtifacts.length === 0
+        unfinished.length === 0 && missingArtifacts.length === 0 && failedDatabaseRuns.length === 0
           ? "All generated feature slices passed the end-to-end flow validation."
-          : `Flow validation blocked: ${unfinished.length} unfinished features, ${missingArtifacts.length} features missing generated code.`,
+          : `Flow validation blocked: ${unfinished.length} unfinished features, ${missingArtifacts.length} features missing generated code, ${failedDatabaseRuns.length} failed database executions.`,
       bugs: [],
       createdAt: new Date().toISOString(),
     };

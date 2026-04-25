@@ -29,6 +29,15 @@ export interface StitchRuntimeEnv {
   modelId?: StitchModelId;
 }
 
+export interface DatabaseRuntimeEnv {
+  url: string;
+  autoStartDocker: boolean;
+  dockerImage: string;
+  dockerContainerName: string;
+  dockerPort: number;
+  connectTimeoutMs: number;
+}
+
 // 读取可选环境变量；如果没配置，就返回 undefined。
 function readOptional(name: string): string | undefined {
   const value = process.env[name]?.trim();
@@ -44,6 +53,23 @@ function readNumber(name: string, fallback: number): number {
 
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readBoolean(name: string, fallback: boolean): boolean {
+  const raw = readOptional(name);
+  if (!raw) {
+    return fallback;
+  }
+
+  if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) {
+    return true;
+  }
+
+  if (["0", "false", "no", "off"].includes(raw.toLowerCase())) {
+    return false;
+  }
+
+  return fallback;
 }
 
 // 读取 Stitch 的设备类型，例如 DESKTOP / MOBILE。
@@ -85,4 +111,20 @@ export function hasRealStitchCredentials(env: StitchRuntimeEnv): boolean {
   const hasApiKey = Boolean(env.apiKey);
   const hasOAuth = Boolean(env.accessToken && env.googleCloudProject);
   return hasApiKey || hasOAuth;
+}
+
+// 数据库执行阶段默认会优先读取 DATABASE_URL；
+// 如果没有配置，就自动回退到项目专用的本地 Docker PostgreSQL。
+export function readDatabaseRuntimeEnv(): DatabaseRuntimeEnv {
+  const dockerPort = readNumber("POSTGRES_DOCKER_PORT", 55_432);
+  const defaultUrl = `postgresql://postgres:postgres@127.0.0.1:${dockerPort}/ui_se`;
+
+  return {
+    url: readOptional("DATABASE_URL") ?? defaultUrl,
+    autoStartDocker: readBoolean("POSTGRES_AUTO_START", true),
+    dockerImage: readOptional("POSTGRES_DOCKER_IMAGE") ?? "postgres:16-alpine",
+    dockerContainerName: readOptional("POSTGRES_DOCKER_CONTAINER") ?? "ui-se-postgres",
+    dockerPort,
+    connectTimeoutMs: readNumber("DATABASE_CONNECT_TIMEOUT_MS", 8_000),
+  };
 }

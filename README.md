@@ -10,7 +10,7 @@
 6. 检查最终结果是否仍与原始需求一致
 7. 最终给客户预览，确认后进入部署阶段
 
-当前仓库仍然是演示版骨架，但已经不只是“流程说明”了。现在 UI 确认后，前端、后端和修复 agent 会把代码真正写入独立的任务工作区，再由测试层检查这些生成出来的文件。
+当前仓库仍然是演示版骨架，但已经不只是“流程说明”了。现在 UI 确认后，前端、后端、数据库和修复 agent 会把代码真正写入独立的任务工作区，数据库 migration/seed 也会真正执行到 PostgreSQL，再由测试层检查这些生成出来的文件和数据库执行结果。
 
 ## 仓库结构
 
@@ -19,7 +19,7 @@
 - `docs/roadmap.md`：按版本推进的开发计划
 - `src/workflow`：工作流编排与状态流转
 - `src/agents`：各个 agent 的角色定义与默认实现
-- `src/tools`：Stitch、测试、部署等确定性工具层
+- `src/tools`：Stitch、数据库执行、面板生成、测试、部署等确定性工具层
 - `src/storage`：任务存储抽象，目前是内存实现
 - `skills`：每个 agent 对应的早期 `SKILL.md`
 - `artifacts`：生成的 spec、UI、测试结果、部署清单等产物
@@ -100,7 +100,8 @@ npm run dev -- --yes --no-open
 - 正在等待你确认是否满意当前设计
 - `frontend-agent` 已写入 2 个代码文件
 - `backend-agent` 已写入 2 个代码文件
-- `db-agent` 已写入 4 个代码文件
+- `db-agent` 已写入 5 个代码文件
+- 正在将 migration/seed 执行到 PostgreSQL
 - `fix-agent` 已写入 3 到 4 个代码文件
 - 正在等待你确认是否允许发布
 
@@ -118,6 +119,7 @@ npm run dev -- --yes --no-open
 - `frontend-agent` 会生成前端组件和样式文件
 - `backend-agent` 会生成路由和 schema 文件
 - `db-agent` 会生成 Prisma schema、PostgreSQL migration、seed 和 repository 文件
+- `database-runner` 会读取这些 migration/seed，并真正执行到 PostgreSQL
 - `fix-agent` 会读取这些文件，并在测试失败后生成修复版改动
 - `test-runner` 会真实检查这些生成文件是否存在、是否还残留 TODO、是否具备关键标记，以及 Prisma/PostgreSQL 配置是否到位
 - `monitor-agent` 会在每个功能点修复完成后立即检查一次，看前端、后端、数据库层有没有偏离已批准的需求与架构
@@ -148,22 +150,43 @@ npm run dev -- --yes --no-open
   - 检查了哪些文件
   - 是否尝试过自动定向修复
 
+## 网页面板
+
+现在每个 job 都会额外生成一个静态网页面板：
+
+- `artifacts/dashboard/<jobId>/index.html`
+
+面板里会汇总：
+
+- 当前需求摘要和阶段
+- 最新 UI 预览
+- 功能点状态
+- PostgreSQL 执行记录
+- 偏航报告
+- `workflow.jsonl` 时间线
+
+这样你不用只盯着终端输出，也可以直接打开一个页面回看整个任务在什么时候、哪一层出了问题。
+
 ## Prisma + PostgreSQL 数据层
 
-当前版本已经把数据库层纳入编排：
+当前版本已经把数据库层纳入编排，而且不是只生成文件了：
 
 - `db-agent` 负责为每个功能点生成 Prisma + PostgreSQL 数据模型
 - 会生成共享的 `schema.prisma`
 - 会为每个功能点生成独立 migration SQL
-- 会生成每个功能点的 seed 文件
+- 会生成每个功能点的 Prisma seed 脚本和可直接执行的 SQL seed
 - 会生成给后端使用的 repository 层
+- `database-runner` 会把 migration/seed 真正执行到 PostgreSQL
+- 如果你没有手动配置 `DATABASE_URL`，系统会默认尝试拉起一个本地 Docker Postgres（`127.0.0.1:55432`）
 
 生成结果会放在：
 
 - `artifacts/code-workspace/<jobId>/database/prisma/schema.prisma`
 - `artifacts/code-workspace/<jobId>/database/prisma/migrations/<feature>_init/migration.sql`
 - `artifacts/code-workspace/<jobId>/database/prisma/seeds/<feature>.ts`
+- `artifacts/code-workspace/<jobId>/database/prisma/seeds/<feature>.sql`
 - `artifacts/code-workspace/<jobId>/database/src/features/<feature>/repository.ts`
+- `artifacts/db-runs/<jobId>/*.json`
 
 这意味着现在的后端代码不只是“留个接口壳子”，而是会显式引用数据库仓储层，形成：
 
@@ -236,7 +259,12 @@ npm run dev -- --yes --no-open
 - `STITCH_MODEL_ID`：`GEMINI_3_PRO`、`GEMINI_3_FLASH`、`GEMINI_3_1_PRO`
 - `STITCH_HOST`：自定义 Stitch MCP 地址
 - `STITCH_PROXY_URL`：手动指定 Stitch 请求走哪个代理
-- `DATABASE_URL`：Prisma/PostgreSQL 的连接串，用于后续接入真实数据库执行阶段
+- `DATABASE_URL`：Prisma/PostgreSQL 的连接串
+- `POSTGRES_AUTO_START`：没有 `DATABASE_URL` 时，是否自动拉起本地 Docker PostgreSQL
+- `POSTGRES_DOCKER_IMAGE`：默认 `postgres:16-alpine`
+- `POSTGRES_DOCKER_CONTAINER`：默认 `ui-se-postgres`
+- `POSTGRES_DOCKER_PORT`：默认 `55432`
+- `DATABASE_CONNECT_TIMEOUT_MS`：数据库连接超时时间
 
 ## 代理行为
 
@@ -259,8 +287,9 @@ npm run dev -- --yes --no-open
 - Stitch SDK 调用与 UI 下载
 - 任务级独立代码工作区
 - 前端/后端/数据库代码文件生成与落盘
+- PostgreSQL migration/seed 真执行
 - 基于生成文件的测试与修复闭环
-- Prisma + PostgreSQL 数据层骨架
+- 偏航报告和工作流网页面板
 - 最终发布前客户确认
 - 产物落盘到 `artifacts/`
 
@@ -284,6 +313,6 @@ npm run dev -- --yes --no-open
 1. 把 `spec-agent` 从“自动澄清”升级成“可交互追问”的 clarify loop
 2. 把当前文件级测试规则换成真实的前端/后端/API/数据库测试命令
 3. 把生成代码目录从 `artifacts/code-workspace` 接到真实业务仓库
-4. 让 Prisma migration 和 seed 真正执行到 PostgreSQL
-5. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
-6. 把 job 存储从内存换成 SQLite 或 Postgres
+4. 把 `MockDeployer` 换成真实的测试环境或服务器发布流程
+5. 把 job 存储从内存换成 SQLite 或 Postgres
+6. 让网页面板支持筛选、对比不同 UI 版本和不同修复轮次
