@@ -106,6 +106,13 @@ export interface SpecArtifact {
 }
 
 // Stitch 生成出来的 UI 产物信息。
+export interface UiScreenArtifact {
+  order: number;
+  screenId: string;
+  htmlPath?: string;
+  imagePath?: string;
+}
+
 export interface UiArtifact {
   versionNumber: number;
   directoryPath: string;
@@ -116,6 +123,7 @@ export interface UiArtifact {
   htmlPath?: string;
   imagePath?: string;
   metadataPath?: string;
+  screens?: UiScreenArtifact[];
   runtime: "real" | "mock";
   note?: string;
   generatedFromFeedback?: string;

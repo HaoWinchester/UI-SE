@@ -7,6 +7,7 @@ import { readDatabaseRuntimeEnv } from "../config/env.js";
 import type {
   FeatureSpec,
   GeneratedProjectArtifact,
+  UiArtifact,
   WorkflowJob,
 } from "../types/domain.js";
 import { getFeatureCodePaths, getPrismaFeatureNames } from "../utils/feature-paths.js";
@@ -83,13 +84,19 @@ export class WorkspaceGeneratedProjectBuilder implements GeneratedProjectBuilder
     const readmePath = path.posix.join(directoryPath, "README.md");
     const indexHtmlPath = path.posix.join(publicDirPath, "index.html");
     const runtimeHtmlPath = path.posix.join(publicDirPath, "runtime.html");
+    const catalogHtmlPath = path.posix.join(publicDirPath, "catalog.html");
+    const detailHtmlPath = path.posix.join(publicDirPath, "detail.html");
     const appJsPath = path.posix.join(publicDirPath, "app.js");
     const appCssPath = path.posix.join(publicDirPath, "app.css");
-    const runtimeIndexHtml = buildIndexHtml(job);
+    const runtimeIndexHtml = buildAppPageHtml(job, "home");
+    const catalogIndexHtml = buildAppPageHtml(job, "catalog");
+    const detailIndexHtml = buildAppPageHtml(job, "detail");
+    const linkedApprovedSite = await buildLinkedApprovedUiPages(this.baseDir, job.uiArtifact);
     const landingHtml =
-      acceptedUiHtmlFile && job.uiArtifact?.runtime === "real"
+      linkedApprovedSite?.landingHtml ??
+      (acceptedUiHtmlFile && job.uiArtifact?.runtime === "real"
         ? await buildApprovedUiLanding(path.join(absolutePublicDir, acceptedUiHtmlFile), job)
-        : runtimeIndexHtml;
+        : runtimeIndexHtml);
 
     await writeFile(
       path.join(this.baseDir, manifestPath),
@@ -126,7 +133,14 @@ export class WorkspaceGeneratedProjectBuilder implements GeneratedProjectBuilder
     );
     await writeFile(path.join(this.baseDir, readmePath), buildProjectReadme(job, directoryPath), "utf8");
     await writeFile(path.join(this.baseDir, indexHtmlPath), landingHtml, "utf8");
+    if (linkedApprovedSite) {
+      for (const page of linkedApprovedSite.pages) {
+        await writeFile(path.join(this.baseDir, publicDirPath, page.fileName), page.content, "utf8");
+      }
+    }
     await writeFile(path.join(this.baseDir, runtimeHtmlPath), runtimeIndexHtml, "utf8");
+    await writeFile(path.join(this.baseDir, catalogHtmlPath), catalogIndexHtml, "utf8");
+    await writeFile(path.join(this.baseDir, detailHtmlPath), detailIndexHtml, "utf8");
     await writeFile(path.join(this.baseDir, appJsPath), buildBrowserEntry(), "utf8");
     await writeFile(path.join(this.baseDir, appCssPath), buildBrowserStyles(), "utf8");
 
@@ -251,26 +265,166 @@ function buildProjectReadme(job: WorkflowJob, directoryPath: string): string {
     "- `/api/project` 项目与需求摘要接口",
     "- `/api/features` 功能与数据接口",
     "- `/` 与批准设计稿一致的前台首页",
-    "- `/runtime.html` 可运行的数据站点",
+    "- `/catalog.html` 网站浏览页",
+    "- `/detail.html?feature=<featureId>` 网站详情页",
     "",
     "网站页面会优先读取当前 job 已执行到 PostgreSQL 的种子数据。",
   ].join("\n");
 }
 
-function buildIndexHtml(job: WorkflowJob): string {
+function buildAppPageHtml(job: WorkflowJob, pageKind: "home" | "catalog" | "detail"): string {
+  const titleSuffix =
+    pageKind === "catalog"
+      ? "内容浏览"
+      : pageKind === "detail"
+        ? "内容详情"
+        : job.requirement.title;
   return `<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(job.requirement.title)}</title>
+    <title>${escapeHtml(titleSuffix)}</title>
     <link rel="stylesheet" href="./app.css" />
   </head>
-  <body>
+  <body data-page="${pageKind}">
     <div id="app">正在加载 ${escapeHtml(job.requirement.title)} ...</div>
     <script type="module" src="./app.js"></script>
   </body>
 </html>`;
+}
+
+async function buildLinkedApprovedUiPages(
+  baseDir: string,
+  uiArtifact: UiArtifact | undefined,
+): Promise<
+  | {
+      landingHtml: string;
+      pages: Array<{ fileName: string; content: string }>;
+    }
+  | undefined
+> {
+  if (uiArtifact?.runtime !== "real" || !uiArtifact.screens?.length) {
+    return undefined;
+  }
+
+  const htmlScreens = uiArtifact.screens.filter((screen) => screen.htmlPath);
+  if (htmlScreens.length === 0) {
+    return undefined;
+  }
+
+  const routeMap = htmlScreens.map((screen, index) => ({
+    ...screen,
+    fileName: index === 0 ? "index.html" : `screen-${index + 1}.html`,
+    label: `页面 ${index + 1}`,
+  }));
+
+  const pages = await Promise.all(
+    routeMap.map(async (screen, index) => {
+      const htmlPath = path.isAbsolute(screen.htmlPath!)
+        ? screen.htmlPath!
+        : path.join(baseDir, screen.htmlPath!);
+      const sourceHtml = await readFile(htmlPath, "utf8");
+      return {
+        fileName: screen.fileName,
+        content: injectScreenNavigation(sourceHtml, {
+          currentIndex: index,
+          screenCount: routeMap.length,
+          routes: routeMap.map((item) => ({
+            label: item.label,
+            href: `./${item.fileName}`,
+          })),
+        }),
+      };
+    }),
+  );
+
+  return {
+    landingHtml: pages[0].content,
+    pages: pages.slice(1),
+  };
+}
+
+function injectScreenNavigation(
+  sourceHtml: string,
+  input: {
+    currentIndex: number;
+    screenCount: number;
+    routes: Array<{ label: string; href: string }>;
+  },
+): string {
+  const previous = input.currentIndex > 0 ? input.routes[input.currentIndex - 1] : undefined;
+  const next =
+    input.currentIndex < input.routes.length - 1 ? input.routes[input.currentIndex + 1] : undefined;
+  const navHtml = `
+<style>
+  .ui-se-screen-nav {
+    position: fixed;
+    right: 24px;
+    top: 24px;
+    z-index: 120;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    max-width: min(92vw, 720px);
+    padding: 12px 14px;
+    border-radius: 20px;
+    background: rgba(10, 10, 14, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  }
+  .ui-se-screen-nav__title {
+    color: #ffffff;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 800;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  .ui-se-screen-nav a {
+    color: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    padding: 8px 12px;
+    text-decoration: none;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .ui-se-screen-nav a.is-active {
+    background: rgba(155, 168, 255, 0.18);
+    border-color: rgba(155, 168, 255, 0.48);
+    color: #ffffff;
+  }
+  @media (max-width: 720px) {
+    .ui-se-screen-nav {
+      left: 12px;
+      right: 12px;
+      top: 12px;
+    }
+  }
+</style>
+<nav class="ui-se-screen-nav" aria-label="Generated screen navigation">
+  <span class="ui-se-screen-nav__title">Stitch 页面流</span>
+  ${input.routes
+    .map(
+      (route, index) =>
+        `<a href="${route.href}" class="${index === input.currentIndex ? "is-active" : ""}">${route.label}</a>`,
+    )
+    .join("")}
+  ${previous ? `<a href="${previous.href}">上一页</a>` : ""}
+  ${next ? `<a href="${next.href}">下一页</a>` : ""}
+  <a href="./catalog.html">运行数据页</a>
+</nav>`;
+
+  if (sourceHtml.includes("</body>")) {
+    return sourceHtml.replace("</body>", `${navHtml}\n</body>`);
+  }
+
+  return `${sourceHtml}\n${navHtml}`;
 }
 
 async function buildApprovedUiLanding(
@@ -812,10 +966,17 @@ function buildBrowserEntry(): string {
     "}",
     "",
     "function getCurrentView(items) {",
-    "  const hash = window.location.hash.replace(/^#/, '');",
-    "  if (!hash) {",
-    "    return { page: 'home' };",
+    "  const staticPage = document.body.dataset.page || 'home';",
+    "  if (staticPage === 'catalog') {",
+    "    return { page: 'catalog' };",
     "  }",
+    "  if (staticPage === 'detail') {",
+    "    const search = new URL(window.location.href).searchParams;",
+    "    const featureId = search.get('feature');",
+    "    const match = items.find((item) => item.id === featureId || item.slug === featureId);",
+    "    return { page: 'detail', item: match || items[0] };",
+    "  }",
+    "  const hash = window.location.hash.replace(/^#/, '');",
     "  if (hash === 'catalog') {",
     "    return { page: 'catalog' };",
     "  }",
@@ -829,12 +990,12 @@ function buildBrowserEntry(): string {
     "  return { page: 'home' };",
     "}",
     "",
-    "function renderTopNav(theme, currentPage) {",
+    "function renderTopNav(theme, currentPage, activeItem) {",
     "  const links = [",
-    "    { key: 'home', label: theme.nav[0], href: '#home' },",
-    "    { key: 'catalog', label: theme.nav[1], href: '#catalog' },",
-    "    { key: 'timeline', label: theme.nav[2], href: '#catalog' },",
-    "    { key: 'detail', label: theme.nav[3], href: '#catalog' },",
+    "    { key: 'home', label: theme.nav[0], href: './' },",
+    "    { key: 'catalog', label: theme.nav[1], href: './catalog.html' },",
+    "    { key: 'timeline', label: theme.nav[2], href: './catalog.html' },",
+    "    { key: 'detail', label: theme.nav[3], href: activeItem ? `./detail.html?feature=${encodeURIComponent(activeItem.id)}` : './catalog.html' },",
     "  ];",
     "  return links.map((link) => `",
     "    <a class=\"site-nav-link ${currentPage === link.key ? 'is-active' : ''}\" href=\"${link.href}\">${link.label}</a>",
@@ -858,7 +1019,7 @@ function buildBrowserEntry(): string {
     "        <p class=\"hero-summary\">${escapeHtml(project.summary)}</p>",
     "        <p class=\"hero-lead\">${escapeHtml(theme.heroLead)}</p>",
     "        <div class=\"hero-actions\">",
-    "          <a class=\"hero-primary\" href=\"#detail/${leadItem.slug}\">进入主路径</a>",
+    "          <a class=\"hero-primary\" href=\"./detail.html?feature=${encodeURIComponent(leadItem.id)}\">进入主路径</a>",
     "          ${actions}",
     "        </div>",
     "      </div>",
@@ -894,7 +1055,7 @@ function buildBrowserEntry(): string {
     "          <p class=\"section-eyebrow\">内容浏览</p>",
     "          <h2>本季推荐片单</h2>",
     "        </div>",
-    "        <a class=\"text-link\" href=\"#catalog\">查看全部</a>",
+    "        <a class=\"text-link\" href=\"./catalog.html\">查看全部</a>",
     "      </div>",
     "      <div class=\"catalog-grid\">",
     "        ${items.map((item, index) => `",
@@ -913,7 +1074,7 @@ function buildBrowserEntry(): string {
     "              </div>",
     "              <p class=\"anime-copy\">${escapeHtml(item.summary)}</p>",
     "              <div class=\"anime-actions\">",
-    "                <a class=\"card-link\" href=\"#detail/${item.slug}\">查看详情</a>",
+    "                <a class=\"card-link\" href=\"./detail.html?feature=${encodeURIComponent(item.id)}\">查看详情</a>",
     "                <span class=\"record-meta\">${item.recordCount} 条内容</span>",
     "              </div>",
     "            </div>",
@@ -984,9 +1145,9 @@ function buildBrowserEntry(): string {
     "  return `",
     "    <main class=\"site-shell\">",
     "      <header class=\"topbar\">",
-    "        <a class=\"brand\" href=\"#home\">${escapeHtml(theme.label)}</a>",
-    "        <nav class=\"site-nav\">${renderTopNav(theme, 'home')}</nav>",
-    "        <a class=\"topbar-link\" href=\"#catalog\">开始浏览</a>",
+    "        <a class=\"brand\" href=\"./\">${escapeHtml(theme.label)}</a>",
+    "        <nav class=\"site-nav\">${renderTopNav(theme, 'home', leadItem)}</nav>",
+    "        <a class=\"topbar-link\" href=\"./catalog.html\">开始浏览</a>",
     "      </header>",
     "      ${renderHero(project, theme, leadItem)}",
     "      ${renderChipRow(theme)}",
@@ -1001,9 +1162,9 @@ function buildBrowserEntry(): string {
     "  return `",
     "    <main class=\"site-shell\">",
     "      <header class=\"topbar compact\">",
-    "        <a class=\"brand\" href=\"#home\">${escapeHtml(theme.label)}</a>",
-    "        <nav class=\"site-nav\">${renderTopNav(theme, 'catalog')}</nav>",
-    "        <a class=\"topbar-link\" href=\"#home\">返回首页</a>",
+    "        <a class=\"brand\" href=\"./\">${escapeHtml(theme.label)}</a>",
+    "        <nav class=\"site-nav\">${renderTopNav(theme, 'catalog', items[0])}</nav>",
+    "        <a class=\"topbar-link\" href=\"./\">返回首页</a>",
     "      </header>",
     "      <section class=\"page-header\">",
     "        <p class=\"section-eyebrow\">片单浏览</p>",
@@ -1031,9 +1192,9 @@ function buildBrowserEntry(): string {
     "  return `",
     "    <main class=\"site-shell\">",
     "      <header class=\"topbar compact\">",
-    "        <a class=\"brand\" href=\"#home\">${escapeHtml(theme.label)}</a>",
-    "        <nav class=\"site-nav\">${renderTopNav(theme, 'detail')}</nav>",
-    "        <a class=\"topbar-link\" href=\"#catalog\">返回浏览</a>",
+    "        <a class=\"brand\" href=\"./\">${escapeHtml(theme.label)}</a>",
+    "        <nav class=\"site-nav\">${renderTopNav(theme, 'detail', item)}</nav>",
+    "        <a class=\"topbar-link\" href=\"./catalog.html\">返回浏览</a>",
     "      </header>",
     "      <section class=\"detail-hero\">",
     "        <div class=\"detail-copy\">",
@@ -1094,9 +1255,11 @@ function buildBrowserEntry(): string {
     "  }",
     "}",
     "",
-    "window.addEventListener('hashchange', () => {",
-    "  void main();",
-    "});",
+    "if ((document.body.dataset.page || 'home') === 'home') {",
+    "  window.addEventListener('hashchange', () => {",
+    "    void main();",
+    "  });",
+    "}",
     "",
     "main();",
     "",

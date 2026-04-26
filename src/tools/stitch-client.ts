@@ -33,6 +33,12 @@ export interface StitchDownloadResult {
   htmlPath?: string;
   imagePath?: string;
   metadataPath?: string;
+  screens?: Array<{
+    order: number;
+    screenId: string;
+    htmlPath?: string;
+    imagePath?: string;
+  }>;
   note?: string;
 }
 
@@ -151,6 +157,14 @@ export class MockStitchClient implements StitchClient {
       htmlPath,
       imagePath,
       metadataPath,
+      screens: [
+        {
+          order: 1,
+          screenId: stitchJobId,
+          htmlPath,
+          imagePath,
+        },
+      ],
       note: this.note,
     };
   }
@@ -226,11 +240,53 @@ export class RealStitchClient implements StitchClient {
     }
 
     await mkdir(targetDir, { recursive: true });
+    const screensDir = path.join(targetDir, "screens");
+    await mkdir(screensDir, { recursive: true });
 
-    const baseName = sanitizeArtifactName(job.screenId ?? stitchJobId);
-    const htmlPath = await downloadUrlToDirectory(job.htmlUrl, targetDir, `${baseName}.html`);
-    const imagePath = await downloadUrlToDirectory(job.imageUrl, targetDir, `${baseName}.png`);
-    const metadataPath = path.join(targetDir, `${baseName}.json`);
+    const project = job.projectId ? this.sdk.project(job.projectId) : undefined;
+    const discoveredScreens = project ? await project.screens().catch(() => []) : [];
+    const orderedScreens = sortScreensWithPrimaryFirst(discoveredScreens, job.screenId);
+    const downloadedScreens =
+      orderedScreens.length > 0
+        ? await Promise.all(
+            orderedScreens.map(async (screen, index) => {
+              const [htmlUrl, imageUrl] = await Promise.all([
+                screen.screenId === job.screenId && job.htmlUrl ? job.htmlUrl : screen.getHtml(),
+                screen.screenId === job.screenId && job.imageUrl ? job.imageUrl : screen.getImage(),
+              ]);
+              const baseName = `${String(index + 1).padStart(2, "0")}-${sanitizeArtifactName(screen.screenId)}`;
+              const htmlPath = await downloadUrlToDirectory(htmlUrl, screensDir, `${baseName}.html`);
+              const imagePath = await downloadUrlToDirectory(imageUrl, screensDir, `${baseName}.png`);
+              return {
+                order: index + 1,
+                screenId: screen.screenId,
+                htmlPath,
+                imagePath,
+              };
+            }),
+          )
+        : [
+            {
+              order: 1,
+              screenId: job.screenId ?? stitchJobId,
+              htmlPath: await downloadUrlToDirectory(
+                job.htmlUrl,
+                screensDir,
+                `01-${sanitizeArtifactName(job.screenId ?? stitchJobId)}.html`,
+              ),
+              imagePath: await downloadUrlToDirectory(
+                job.imageUrl,
+                screensDir,
+                `01-${sanitizeArtifactName(job.screenId ?? stitchJobId)}.png`,
+              ),
+            },
+          ];
+
+    const primaryScreen = downloadedScreens[0];
+    const htmlPath = primaryScreen.htmlPath;
+    const imagePath = primaryScreen.imagePath;
+    const metadataBaseName = sanitizeArtifactName(primaryScreen.screenId);
+    const metadataPath = path.join(targetDir, `${metadataBaseName}.json`);
 
     await writeFile(
       metadataPath,
@@ -244,6 +300,7 @@ export class RealStitchClient implements StitchClient {
           imageUrl: job.imageUrl,
           htmlPath,
           imagePath,
+          screens: downloadedScreens,
         },
         null,
         2,
@@ -256,6 +313,7 @@ export class RealStitchClient implements StitchClient {
       htmlPath,
       imagePath,
       metadataPath,
+      screens: downloadedScreens,
     };
   }
 
@@ -407,6 +465,29 @@ function extensionFromResponse(url: string, contentType: string | null): string 
   const pathname = new URL(url).pathname;
   const extension = path.extname(pathname);
   return extension || undefined;
+}
+
+function sortScreensWithPrimaryFirst(
+  screens: Array<{
+    screenId: string;
+    getHtml(): Promise<string>;
+    getImage(): Promise<string>;
+  }>,
+  primaryScreenId: string | undefined,
+) {
+  if (!primaryScreenId) {
+    return screens;
+  }
+
+  return [...screens].sort((left, right) => {
+    if (left.screenId === primaryScreenId) {
+      return -1;
+    }
+    if (right.screenId === primaryScreenId) {
+      return 1;
+    }
+    return 0;
+  });
 }
 
 // 用 prompt 的第一行生成一个项目标题。

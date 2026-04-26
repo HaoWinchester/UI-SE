@@ -875,6 +875,7 @@ export class DeliveryOrchestrator {
           htmlPath: download.htmlPath,
           imagePath: download.imagePath,
           metadataPath: download.metadataPath,
+          screens: download.screens,
           runtime: submission.runtime,
           note: submission.note ?? download.note,
           generatedFromFeedback: options.generatedFromFeedback,
