@@ -417,7 +417,6 @@ function injectScreenNavigation(
     .join("")}
   ${previous ? `<a href="${previous.href}">上一页</a>` : ""}
   ${next ? `<a href="${next.href}">下一页</a>` : ""}
-  <a href="./catalog.html">运行数据页</a>
 </nav>`;
 
   if (sourceHtml.includes("</body>")) {

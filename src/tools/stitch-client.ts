@@ -82,9 +82,13 @@ interface RealStitchRecord {
   status: StitchJobStatus;
   projectId?: string;
   screenId?: string;
-  screenIds?: string[];
-  htmlUrl?: string;
-  imageUrl?: string;
+  generatedScreens?: Array<{
+    name: string;
+    projectId: string;
+    screenId: string;
+    htmlUrl: string;
+    imageUrl: string;
+  }>;
 }
 
 export class MockStitchClient implements StitchClient {
@@ -223,40 +227,49 @@ export class RealStitchClient implements StitchClient {
     this.jobs.set(stitchJobId, { prompt: request.prompt, screenPrompts, status: "queued" });
 
     try {
-      const project = await this.resolveProject(request.prompt);
-      this.jobs.set(stitchJobId, {
-        prompt: request.prompt,
-        screenPrompts,
-        status: "running",
-        projectId: project.projectId,
-      });
-
       const generatedScreens = [];
-      for (const screenPrompt of screenPrompts) {
-        generatedScreens.push(
-          await project.generate(screenPrompt.prompt, this.options.deviceType, this.options.modelId),
+      for (const [index, screenPrompt] of screenPrompts.entries()) {
+        const project = await this.resolveProject(request.prompt, screenPrompt, index, screenPrompts.length);
+        this.jobs.set(stitchJobId, {
+          prompt: request.prompt,
+          screenPrompts,
+          status: "running",
+          projectId: project.projectId,
+        });
+        console.log(
+          `[stitch] generating screen ${index + 1}/${screenPrompts.length}: ${screenPrompt.name}`,
+        );
+        const screen = await project.generate(
+          screenPrompt.prompt,
+          this.options.deviceType,
+          this.options.modelId,
+        );
+        const [htmlUrl, imageUrl] = await Promise.all([screen.getHtml(), screen.getImage()]);
+        generatedScreens.push({
+          name: screenPrompt.name,
+          projectId: project.projectId,
+          screenId: screen.screenId,
+          htmlUrl,
+          imageUrl,
+        });
+        console.log(
+          `[stitch] generated screen ${index + 1}/${screenPrompts.length}: ${screenPrompt.name} (${screen.screenId})`,
         );
       }
       const primaryScreen = generatedScreens[0];
-      const [htmlUrl, imageUrl] = await Promise.all([
-        primaryScreen.getHtml(),
-        primaryScreen.getImage(),
-      ]);
 
       this.jobs.set(stitchJobId, {
         prompt: request.prompt,
         screenPrompts,
         status: "completed",
-        projectId: project.projectId,
+        projectId: primaryScreen.projectId,
         screenId: primaryScreen.screenId,
-        screenIds: generatedScreens.map((screen) => screen.screenId),
-        htmlUrl,
-        imageUrl,
+        generatedScreens,
       });
 
       return {
         stitchJobId,
-        projectId: project.projectId,
+        projectId: primaryScreen.projectId,
         screenId: primaryScreen.screenId,
         runtime: "real",
       };
@@ -278,52 +291,26 @@ export class RealStitchClient implements StitchClient {
 
   async downloadResult(stitchJobId: string, targetDir: string): Promise<StitchDownloadResult> {
     const job = this.requireJob(stitchJobId);
-    if (job.status !== "completed" || !job.htmlUrl || !job.imageUrl) {
+    if (job.status !== "completed" || !job.generatedScreens?.length) {
       throw new Error(`Stitch job ${stitchJobId} is not ready for download.`);
     }
 
     await mkdir(targetDir, { recursive: true });
     const screensDir = path.join(targetDir, "screens");
     await mkdir(screensDir, { recursive: true });
-
-    const project = job.projectId ? this.sdk.project(job.projectId) : undefined;
-    const discoveredScreens = project ? await project.screens().catch(() => []) : [];
-    const orderedScreens = sortScreensWithPrimaryFirst(discoveredScreens, job.screenId);
-    const downloadedScreens =
-      orderedScreens.length > 0
-        ? await Promise.all(
-            orderedScreens.map(async (screen, index) => {
-              const [htmlUrl, imageUrl] = await Promise.all([
-                screen.screenId === job.screenId && job.htmlUrl ? job.htmlUrl : screen.getHtml(),
-                screen.screenId === job.screenId && job.imageUrl ? job.imageUrl : screen.getImage(),
-              ]);
-              const baseName = `${String(index + 1).padStart(2, "0")}-${sanitizeArtifactName(screen.screenId)}`;
-              const htmlPath = await downloadUrlToDirectory(htmlUrl, screensDir, `${baseName}.html`);
-              const imagePath = await downloadUrlToDirectory(imageUrl, screensDir, `${baseName}.png`);
-              return {
-                order: index + 1,
-                screenId: screen.screenId,
-                htmlPath,
-                imagePath,
-              };
-            }),
-          )
-        : [
-            {
-              order: 1,
-              screenId: job.screenId ?? stitchJobId,
-              htmlPath: await downloadUrlToDirectory(
-                job.htmlUrl,
-                screensDir,
-                `01-${sanitizeArtifactName(job.screenId ?? stitchJobId)}.html`,
-              ),
-              imagePath: await downloadUrlToDirectory(
-                job.imageUrl,
-                screensDir,
-                `01-${sanitizeArtifactName(job.screenId ?? stitchJobId)}.png`,
-              ),
-            },
-          ];
+    const downloadedScreens = await Promise.all(
+      job.generatedScreens.map(async (screen, index) => {
+        const baseName = `${String(index + 1).padStart(2, "0")}-${sanitizeArtifactName(screen.screenId)}`;
+        const htmlPath = await downloadUrlToDirectory(screen.htmlUrl, screensDir, `${baseName}.html`);
+        const imagePath = await downloadUrlToDirectory(screen.imageUrl, screensDir, `${baseName}.png`);
+        return {
+          order: index + 1,
+          screenId: screen.screenId,
+          htmlPath,
+          imagePath,
+        };
+      }),
+    );
 
     const primaryScreen = downloadedScreens[0];
     const htmlPath = primaryScreen.htmlPath;
@@ -339,8 +326,6 @@ export class RealStitchClient implements StitchClient {
           stitchJobId,
           projectId: job.projectId,
           screenId: job.screenId,
-          htmlUrl: job.htmlUrl,
-          imageUrl: job.imageUrl,
           htmlPath,
           imagePath,
           screens: downloadedScreens,
@@ -360,13 +345,22 @@ export class RealStitchClient implements StitchClient {
     };
   }
 
-  private async resolveProject(prompt: string) {
-    // 如果配置了 projectId，就复用它；否则为当前需求创建一个新项目。
-    if (this.options.projectId) {
+  private async resolveProject(
+    prompt: string,
+    screenPrompt: StitchScreenPrompt,
+    index: number,
+    totalScreens: number,
+  ) {
+    // 单页模式可以复用指定 projectId；多页模式为了稳定性，按 screen 独立建项目。
+    if (this.options.projectId && totalScreens === 1) {
       return this.sdk.project(this.options.projectId);
     }
 
-    return this.sdk.createProject(deriveProjectTitle(prompt));
+    return this.sdk.createProject(
+      deriveProjectTitle(
+        totalScreens === 1 ? prompt : `${deriveProjectTitle(prompt)} - ${index + 1} ${screenPrompt.name}`,
+      ),
+    );
   }
 
   private requireJob(stitchJobId: string): RealStitchRecord {

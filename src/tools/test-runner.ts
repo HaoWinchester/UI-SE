@@ -346,12 +346,27 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
 
       if (includeHtmlChecks) {
         const html = await fetchText(`http://127.0.0.1:${port}/`);
-        if (!html.includes(job.requirement.title)) {
-          issues.push("Generated project homepage does not render the clarified requirement title.");
-        }
+        const usingRealStitchScreens = job.uiArtifact?.runtime === "real" && (job.uiArtifact.screens?.length ?? 0) > 0;
+        if (usingRealStitchScreens) {
+          if (!html.includes("Stitch 页面流")) {
+            issues.push("Generated project homepage does not expose the Stitch multi-screen navigation.");
+          }
 
-        if (!html.includes('src="./app.js"')) {
-          issues.push("Generated project homepage does not load the runtime app.js entry.");
+          const totalScreens = job.uiArtifact?.screens?.length ?? 0;
+          for (let index = 1; index < totalScreens; index += 1) {
+            const screenHtml = await fetchText(`http://127.0.0.1:${port}/screen-${index + 1}.html`);
+            if (!screenHtml.includes("Stitch 页面流")) {
+              issues.push(`Generated project screen-${index + 1}.html does not expose the Stitch multi-screen navigation.`);
+            }
+          }
+        } else {
+          if (!html.includes(job.requirement.title)) {
+            issues.push("Generated project homepage does not render the clarified requirement title.");
+          }
+
+          if (!html.includes('src="./app.js"')) {
+            issues.push("Generated project homepage does not load the runtime app.js entry.");
+          }
         }
       }
     } catch (error) {
