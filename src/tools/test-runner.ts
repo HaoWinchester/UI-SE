@@ -2,7 +2,7 @@
 // 当前版本会真实检查生成出来的前端/后端代码文件，而不是只做纯随机的 mock 测试。
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
@@ -352,11 +352,22 @@ export class GeneratedWorkspaceTestRunner implements TestRunner {
             issues.push("Generated project homepage does not expose the Stitch multi-screen navigation.");
           }
 
-          const totalScreens = job.uiArtifact?.screens?.length ?? 0;
-          for (let index = 1; index < totalScreens; index += 1) {
-            const screenHtml = await fetchText(`http://127.0.0.1:${port}/screen-${index + 1}.html`);
+          const publicDir = path.join(this.baseDir, artifact.publicDirPath);
+          const screenFiles = (await readdir(publicDir))
+            .filter(
+              (fileName) =>
+                fileName.endsWith(".html") &&
+                !["index.html", "runtime.html", "catalog.html", "detail.html", "approved-ui.html"].includes(fileName),
+            )
+            .sort();
+          if (screenFiles.length !== Math.max((job.uiArtifact?.screens?.length ?? 1) - 1, 0)) {
+            issues.push("Generated project did not emit the expected number of Stitch-linked HTML pages.");
+          }
+
+          for (const screenFile of screenFiles) {
+            const screenHtml = await fetchText(`http://127.0.0.1:${port}/${screenFile}`);
             if (!screenHtml.includes("Stitch 页面流")) {
-              issues.push(`Generated project screen-${index + 1}.html does not expose the Stitch multi-screen navigation.`);
+              issues.push(`Generated project ${screenFile} does not expose the Stitch multi-screen navigation.`);
             }
           }
         } else {

@@ -46,6 +46,7 @@ export interface StitchDownloadResult {
   metadataPath?: string;
   screens?: Array<{
     order: number;
+    name?: string;
     screenId: string;
     htmlPath?: string;
     imagePath?: string;
@@ -161,6 +162,7 @@ export class MockStitchClient implements StitchClient {
         await writeFile(imagePath, ONE_PIXEL_PNG);
         return {
           order: index + 1,
+          name: screenPrompt.name,
           screenId,
           htmlPath,
           imagePath,
@@ -305,6 +307,7 @@ export class RealStitchClient implements StitchClient {
         const imagePath = await downloadUrlToDirectory(screen.imageUrl, screensDir, `${baseName}.png`);
         return {
           order: index + 1,
+          name: screen.name,
           screenId: screen.screenId,
           htmlPath,
           imagePath,

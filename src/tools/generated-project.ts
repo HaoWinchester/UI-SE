@@ -313,11 +313,16 @@ async function buildLinkedApprovedUiPages(
     return undefined;
   }
 
-  const routeMap = htmlScreens.map((screen, index) => ({
-    ...screen,
-    fileName: index === 0 ? "index.html" : `screen-${index + 1}.html`,
-    label: `页面 ${index + 1}`,
-  }));
+  const usedRouteSlugs = new Set<string>();
+  const routeMap = htmlScreens.map((screen, index) => {
+    const label = buildScreenLabel(screen.name, index);
+    const routeSlug = buildUniqueScreenRouteSlug(screen.name, index, usedRouteSlugs);
+    return {
+      ...screen,
+      fileName: index === 0 ? "index.html" : `${routeSlug}.html`,
+      label,
+    };
+  });
 
   const pages = await Promise.all(
     routeMap.map(async (screen, index) => {
@@ -329,7 +334,6 @@ async function buildLinkedApprovedUiPages(
         fileName: screen.fileName,
         content: injectScreenNavigation(sourceHtml, {
           currentIndex: index,
-          screenCount: routeMap.length,
           routes: routeMap.map((item) => ({
             label: item.label,
             href: `./${item.fileName}`,
@@ -349,13 +353,52 @@ function injectScreenNavigation(
   sourceHtml: string,
   input: {
     currentIndex: number;
-    screenCount: number;
     routes: Array<{ label: string; href: string }>;
   },
 ): string {
+  const routeModel = deriveInteractiveRouteModel(input.routes);
   const previous = input.currentIndex > 0 ? input.routes[input.currentIndex - 1] : undefined;
   const next =
     input.currentIndex < input.routes.length - 1 ? input.routes[input.currentIndex + 1] : undefined;
+  const bridgeScript = `
+<script>
+  (() => {
+    const routeModel = ${JSON.stringify(routeModel)};
+    const normalize = (value) => (value || "")
+      .toLowerCase()
+      .replace(/\\s+/g, " ")
+      .trim();
+    const matchRoute = (text) => {
+      const normalized = normalize(text);
+      if (!normalized) return null;
+      for (const rule of routeModel) {
+        if (rule.matchers.some((matcher) => normalized.includes(matcher))) {
+          return rule.href;
+        }
+      }
+      return null;
+    };
+    const patchInteractive = (element) => {
+      const text = normalize(element.textContent);
+      const href = matchRoute(text);
+      if (!href) return;
+      if (element.tagName === "A") {
+        const currentHref = element.getAttribute("href");
+        if (!currentHref || currentHref === "#" || currentHref.startsWith("javascript:")) {
+          element.setAttribute("href", href);
+        }
+      } else {
+        element.style.cursor = "pointer";
+        element.addEventListener("click", () => {
+          window.location.href = href;
+        });
+      }
+    };
+    window.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll("a, button").forEach((element) => patchInteractive(element));
+    });
+  })();
+</script>`;
   const navHtml = `
 <style>
   .ui-se-screen-nav {
@@ -415,15 +458,111 @@ function injectScreenNavigation(
         `<a href="${route.href}" class="${index === input.currentIndex ? "is-active" : ""}">${route.label}</a>`,
     )
     .join("")}
-  ${previous ? `<a href="${previous.href}">上一页</a>` : ""}
-  ${next ? `<a href="${next.href}">下一页</a>` : ""}
+  ${previous ? `<a href="${previous.href}">上一个页面</a>` : ""}
+  ${next ? `<a href="${next.href}">下一个页面</a>` : ""}
 </nav>`;
 
   if (sourceHtml.includes("</body>")) {
-    return sourceHtml.replace("</body>", `${navHtml}\n</body>`);
+    return sourceHtml.replace("</body>", `${navHtml}\n${bridgeScript}\n</body>`);
   }
 
-  return `${sourceHtml}\n${navHtml}`;
+  return `${sourceHtml}\n${navHtml}\n${bridgeScript}`;
+}
+
+function buildScreenLabel(screenName: string | undefined, index: number): string {
+  const name = screenName?.trim();
+  if (!name) {
+    return `页面 ${index + 1}`;
+  }
+
+  return name;
+}
+
+function buildScreenRouteSlug(screenName: string | undefined, index: number): string {
+  const originalName = screenName ?? `screen-${index + 1}`;
+  const raw = originalName
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const slug = raw
+    .replace(/landing-experience/g, "home")
+    .replace(/首页与主入口体验/g, "entry")
+    .replace(/内容浏览与发现流程/g, "browse")
+    .replace(/详情页与状态反馈/g, "detail");
+  return slug || `screen-${index + 1}`;
+}
+
+function buildUniqueScreenRouteSlug(
+  screenName: string | undefined,
+  index: number,
+  usedRouteSlugs: Set<string>,
+): string {
+  const reservedSlugs = new Set(["index", "runtime", "catalog", "detail", "approved-ui"]);
+  const initialSlug = buildScreenRouteSlug(screenName, index);
+  const baseSlug = reservedSlugs.has(initialSlug) ? `${initialSlug}-screen` : initialSlug;
+  let candidate = baseSlug;
+  let suffix = 2;
+  while (usedRouteSlugs.has(candidate)) {
+    candidate = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+  usedRouteSlugs.add(candidate);
+  return candidate;
+}
+
+function deriveInteractiveRouteModel(
+  routes: Array<{ label: string; href: string }>,
+): Array<{ href: string; matchers: string[] }> {
+  const homeRoute = routes[0];
+  const browseRoute =
+    routes.find((route) => /(browse|discover|library|seasonal|内容浏览|发现)/i.test(route.label)) ??
+    routes[Math.min(1, routes.length - 1)];
+  const detailRoute =
+    routes.find((route) => /(detail|status|详情|状态)/i.test(route.label)) ??
+    routes[routes.length - 1];
+
+  return [
+    {
+      href: homeRoute?.href ?? "./index.html",
+      matchers: ["home", "landing", "brand", "logo", "首页", "主入口", "kinetic chronicle", "kinetic"],
+    },
+    {
+      href: browseRoute?.href ?? homeRoute?.href ?? "./index.html",
+      matchers: [
+        "browse",
+        "discover",
+        "seasonal",
+        "library",
+        "view all",
+        "view full calendar",
+        "view all updates",
+        "trending",
+        "simulcasts",
+        "community",
+        "forum",
+        "discord",
+        "内容浏览",
+        "发现",
+      ],
+    },
+    {
+      href: detailRoute?.href ?? browseRoute?.href ?? homeRoute?.href ?? "./index.html",
+      matchers: [
+        "watch now",
+        "watch latest episode",
+        "preview episode",
+        "my list",
+        "add to list",
+        "add to watchlist",
+        "post review",
+        "rate it",
+        "follow",
+        "detail",
+        "详情",
+        "状态",
+      ],
+    },
+  ];
 }
 
 async function buildApprovedUiLanding(
