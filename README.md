@@ -23,6 +23,7 @@
 - `src/tools`：Stitch、数据库执行、面板生成、测试、部署等确定性工具层
 - `src/storage`：任务存储抽象，目前是内存实现
 - `skills`：每个 agent 的本地 skill，以及复制进仓库的 `speckit-*` skill
+- `docs/skill-pack.md`：这一套系统如何拆成可复用 skill 包
 - `.specify`：Speckit 期望的模板、memory、bash 脚本骨架
 - `specs`：Speckit 风格的规格目录
 - `artifacts`：生成的 spec、UI、测试结果、部署清单等产物
@@ -210,6 +211,28 @@ npm run dev -- --yes --no-open
 这意味着现在的后端代码不只是“留个接口壳子”，而是会显式引用数据库仓储层，形成：
 
 `前端 -> 后端 -> Prisma repository -> PostgreSQL schema/migration/seed`
+
+## Skill 抽取建议
+
+这个项目不建议抽成“一个总 skill”，更适合抽成一组可复用的 agent skill，再由 orchestrator 调度。
+
+当前已经补齐或保留的 skill 角色包括：
+
+- `spec-agent`
+- `ui-agent`
+- `frontend-agent`
+- `backend-agent`
+- `db-agent`
+- `test-agent`
+- `fix-agent`
+- `monitor-agent`
+- `acceptance-agent`
+- `deploy-agent`
+
+对应说明可以看：
+
+- [skills/README.md](/Users/menghao/Documents/幻谱/官网演示项目/UI-SE/skills/README.md)
+- [docs/skill-pack.md](/Users/menghao/Documents/幻谱/官网演示项目/UI-SE/docs/skill-pack.md)
 
 ## UI 版本管理
 

@@ -22,20 +22,29 @@ The source of truth lives in `src/agents/registry.ts`.
 - `ui-agent`
   reads: `docs`, `artifacts/specs`, `skills/ui-agent`
   writes: `artifacts/ui`
-- `dev-agent`
-  reads: `src`, `docs`, `artifacts/ui`, `skills/dev-agent`
-  writes: `src`
+- `frontend-agent`
+  reads: `docs`, `artifacts/ui`, `artifacts/specs`, `artifacts/code-workspace`, `skills/frontend-agent`
+  writes: `artifacts/code-workspace`
+- `backend-agent`
+  reads: `docs`, `artifacts/specs`, `artifacts/code-workspace`, `skills/backend-agent`
+  writes: `artifacts/code-workspace`
+- `db-agent`
+  reads: `docs`, `artifacts/specs`, `artifacts/code-workspace`, `skills/db-agent`
+  writes: `artifacts/code-workspace`
 - `test-agent`
-  reads: `src`, `artifacts/test-reports`, `skills/test-agent`
+  reads: `artifacts/code-workspace`, `artifacts/test-reports`, `skills/test-agent`
   writes: `artifacts/test-reports`
 - `fix-agent`
-  reads: `src`, `artifacts/test-reports`, `skills/fix-agent`
-  writes: `src`
+  reads: `artifacts/code-workspace`, `artifacts/test-reports`, `skills/fix-agent`
+  writes: `artifacts/code-workspace`
 - `monitor-agent`
-  reads: `src`, `docs`, `artifacts`, `skills/monitor-agent`
+  reads: `docs`, `artifacts`, `skills/monitor-agent`
+  writes: none
+- `acceptance-agent`
+  reads: `artifacts`, `docs`, `skills/acceptance-agent`
   writes: none
 - `deploy-agent`
-  reads: `src`, `artifacts/build`, `artifacts/test-reports`, `skills/deploy-agent`
+  reads: `artifacts/build`, `artifacts/test-reports`, `artifacts/code-workspace`, `skills/deploy-agent`
   writes: `artifacts/build`
 
 ## Enforcement
