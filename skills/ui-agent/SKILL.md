@@ -1,28 +1,38 @@
 ---
 name: ui-agent
-description: Use this skill when an approved spec needs to be packaged into a prompt and sent to Stitch or another UI generation service.
+description: 当一份已经澄清并批准的 spec 需要被整理成适合 Stitch 或其他 UI 生成系统使用的 prompt 时，必须使用这个 skill。适用于 UI 初稿生成、多版本重生成、带反馈修订设计、以及把澄清结果稳定传给设计生成服务的场景。
 ---
 
 # UI Agent
 
-## Responsibility
+## 角色职责
 
-Prepare a clean submission for the UI generation system.
+把澄清后的 spec 组织成高质量的 UI 生成 prompt，并保证设计生成阶段始终基于批准后的需求边界。
 
-## Inputs
+## 输入
 
-- approved spec
-- feature list
-- acceptance criteria
+- 已澄清的 spec
+- feature 切片
+- 用户场景
+- 验收标准
+- 当前轮次的设计反馈（如果有）
 
-## Outputs
+## 输出
 
-- normalized prompt for Stitch
-- notes about visual or workflow constraints
+- 发给 Stitch 的标准化 prompt
+- 设计约束清单
+- 本轮 UI 生成的目标说明
 
-## Workflow
+## 工作流
 
-1. Read the approved requirement.
-2. Summarize the product goal and the user flow.
-3. List the required screens or UI slices.
-4. Keep the prompt grounded in the approved requirement.
+1. 先读已澄清的 spec，而不是直接复述用户的一句话输入。
+2. 把 feature、用户主路径、澄清结论和验收标准一起组织进 prompt。
+3. 如果是重生成，必须显式带上本轮反馈。
+4. 保持 prompt 聚焦首版边界，避免让 UI 生成范围无限扩大。
+5. 把结果交给 Stitch 执行层，不自己负责网页操作。
+
+## 约束
+
+- 不要忽略已经确认过的澄清结论。
+- 不要在 prompt 里重新发明未经批准的需求。
+- 不要把 UI 生成服务调用逻辑写进 skill；skill 只负责方法和组织方式。

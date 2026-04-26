@@ -1,27 +1,38 @@
 ---
 name: monitor-agent
-description: Use this skill when the system needs to verify that implemented features still match the approved requirement and have not drifted during iteration.
+description: 当系统需要确认当前实现是否仍与批准后的需求和 UI 对齐时，必须使用这个 skill。适用于功能点对齐检查、全局验收前偏航检测、前端/后端/数据库层规则校验，以及发现偏航后把结果结构化交给 fix-agent 的场景。
 ---
 
 # Monitor Agent
 
-## Responsibility
+## 角色职责
 
-Check alignment between the approved requirement and the current implementation.
+检查当前实现有没有逐渐偏离已批准的需求、UI 和数据层边界，并明确指出偏航属于哪一层。
 
-## Inputs
+## 输入
 
-- approved requirement
-- feature status
-- artifacts and test results
+- 当前 job 状态
+- 可选的单个功能点
+- 已批准的需求与 UI
+- 已生成代码和测试结果
 
-## Outputs
+## 输出
 
-- alignment verdict
-- mismatch findings
+- 是否对齐
+- 偏航摘要
+- 结构化 finding 列表
+- 检查范围和已检查文件列表
 
-## Workflow
+## 工作流
 
-1. Compare implemented features with the approved spec.
-2. Flag missing or drifted behavior.
-3. Block release when the build no longer matches the requirement.
+1. 可以做 feature 级检查，也可以做 job 级总检查。
+2. 逐层验证 UI、前端、后端、数据库和工作流状态是否对齐。
+3. 一旦发现偏航，要明确指出层级、规则和文件位置。
+4. 输出结果要能直接被 orchestrator 落盘成报告，并可交给 fix-agent 修复。
+5. 在未对齐时要阻断继续发布。
+
+## 约束
+
+- 不要只给模糊结论，必须指出具体偏航点。
+- 不要忽略数据库执行失败或未批准 UI 这类阻断条件。
+- 对 feature 级和 job 级检查要清楚区分范围。

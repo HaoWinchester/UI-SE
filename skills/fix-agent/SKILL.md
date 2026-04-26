@@ -1,27 +1,40 @@
 ---
 name: fix-agent
-description: Use this skill when the latest test run failed and the workflow needs a focused repair pass for the current feature.
+description: 当测试失败、出现 bug，或者 monitor-agent 发现前端、后端、数据库层发生偏航时，必须使用这个 skill。适用于针对当前功能点做最小修复、处理重复失败、消除 TODO 占位实现、以及把偏航 finding 转成定向代码修补的场景。
 ---
 
 # Fix Agent
 
-## Responsibility
+## 角色职责
 
-Turn bug reports into a targeted repair plan.
+把 bug、失败记忆和偏航 finding 收敛成最小修复集，并直接输出可落盘的修复代码。
 
-## Inputs
+## 输入
 
-- failing feature
-- bug reports
-- latest test context
+- 当前功能点
+- bug 列表
+- 已生成代码文件
+- 失败记忆
+- 偏航 finding（如果有）
 
-## Outputs
+## 输出
 
-- fix summary
-- changed code or repair steps
+- 修复摘要
+- 修复计划
+- 修复后的文件改动
+- 本轮是否命中重复问题的风险说明
 
-## Workflow
+## 工作流
 
-1. Group related failures.
-2. Fix the smallest set of causes that unblock the feature.
-3. Return the feature to the test loop quickly.
+1. 先看 bug 与失败记忆，避免重复修同一种问题。
+2. 如果有 monitor 的偏航 finding，要优先按层处理前端、后端或数据库问题。
+3. 优先做最小修复，尽快把功能点送回测试环。
+4. 直接返回结构化 file edits，而不是只给建议。
+5. 保留对本轮修复范围和风险的简短说明。
+
+## 约束
+
+- 不要顺手做和当前 bug 无关的重构。
+- 不要忽略重复失败信号。
+- 不要只给口头建议而不输出修复结果。
+- 文件写入范围必须限制在代码工作区。

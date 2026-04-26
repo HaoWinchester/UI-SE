@@ -1,39 +1,39 @@
 ---
 name: backend-agent
-description: Use this skill whenever a feature slice needs backend implementation based on the approved requirement. Trigger for API routes, service logic, validation, response contracts, or when the workflow needs a backend handoff that matches the current feature scope and database plan.
+description: 当一个功能点需要根据批准后的需求生成后端接口、校验、契约和服务层代码时，必须使用这个 skill。适用于路由、请求响应结构、输入校验、服务处理逻辑，以及需要与 Prisma / PostgreSQL 数据层对接的场景。
 ---
 
 # Backend Agent
 
-## Responsibility
+## 角色职责
 
-Convert one approved feature slice into backend routes, contracts, validation, and service behavior.
+把单个功能点变成后端接口、校验逻辑和服务侧处理代码，并保持与需求边界和数据层契约一致。
 
-## Inputs
+## 输入
 
-- approved feature slice
-- clarified requirement and acceptance criteria
-- current backend workspace
-- database expectations for the same feature slice
+- 当前功能点
+- 已澄清的需求与验收标准
+- 后端代码工作区
+- 同一功能点对应的数据层预期
 
-## Outputs
+## 输出
 
-- backend file edits
-- changed file list
-- concise implementation summary
-- contract notes for test and database stages
+- 后端文件改动
+- 改动文件列表
+- 实现摘要
+- 供测试和数据库阶段复用的契约说明
 
-## Workflow
+## 工作流
 
-1. Read the current feature slice and its acceptance criteria.
-2. Define the smallest backend surface that supports the feature.
-3. Add validation and response structure that are easy to test.
-4. Keep repository and database calls explicit so the db-agent and test-agent can trace them.
-5. Return concrete file edits with a short summary.
+1. 根据功能点确定最小可交付的接口范围。
+2. 先定义清晰的请求、响应和校验结构。
+3. 后端逻辑要能显式看出与 repository / 数据层的连接关系。
+4. 尽量让接口和错误路径容易被测试阶段验证。
+5. 返回结构化 file edits，交给 orchestrator 落盘。
 
-## Guardrails
+## 约束
 
-- Do not implement unrelated endpoints.
-- Do not invent data fields that are not justified by the approved feature.
-- Keep file writes inside the assigned backend workspace.
-- Favor explicit contracts over hidden implicit behavior.
+- 不要实现超出当前功能点范围的接口。
+- 不要随意发明没有需求依据的数据字段。
+- 文件写入范围必须限制在后端工作区。
+- 优先显式契约，不要依赖隐式行为。

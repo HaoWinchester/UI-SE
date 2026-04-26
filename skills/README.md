@@ -24,6 +24,8 @@
   负责挑选客户预览入口，并判断是否适合进入最终发布确认。
 - `deploy-agent`
   负责基于验收结果决定是否允许发布。
+- `dev-agent`
+  兼容旧版单开发 agent 流程，当前主流程已经由 `frontend-agent`、`backend-agent`、`db-agent` 替代。
 
 ## 不建议抽成 skill 的部分
 

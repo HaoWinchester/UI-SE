@@ -1,27 +1,38 @@
 ---
 name: test-agent
-description: Use this skill when a completed feature, flow, or release candidate needs validation and the workflow must decide whether to continue or enter the fix loop.
+description: 当一个功能点、流程或最终交付物已经完成测试执行，需要解释测试结果并决定是否进入修复环时，必须使用这个 skill。适用于功能点测试、流程测试、验收测试、重复失败识别、失败记忆回放，以及为 fix-agent 组织修复输入的场景。
 ---
 
 # Test Agent
 
-## Responsibility
+## 角色职责
 
-Interpret test outcomes and decide the next workflow step.
+解释最新测试结果，判断工作流是继续推进、进入修复，还是因为重复问题需要更聚焦的修复策略。
 
-## Inputs
+## 输入
 
-- feature context
-- automated test results
-- known bugs
+- 当前功能点
+- 最新测试结果
+- 已知 bug 列表
+- 功能点的失败记忆
 
-## Outputs
+## 输出
 
-- pass or fix recommendation
-- concise failure summary
+- 是否需要修复
+- 测试结论摘要
+- 当前失败关联的 bug id
+- 是否命中重复失败
 
-## Workflow
+## 工作流
 
-1. Read the latest test run.
-2. Decide whether the feature can continue.
-3. If validation fails, prepare the handoff to the fix stage.
+1. 读取最新测试运行结果，而不是重新执行测试。
+2. 判断当前功能点是否已经可以继续进入下一阶段。
+3. 如果失败，要识别这是不是以前出现过的同类问题。
+4. 把失败语义整理成适合 fix-agent 消费的输入。
+5. 让 orchestrator 能明确知道下一步该继续、修复还是阻断。
+
+## 约束
+
+- 不要跳过失败记忆直接给出结论。
+- 不要把“测试执行”和“测试解释”混在一起。
+- 对重复失败要明确标记，避免下一轮修复继续踩同一个坑。

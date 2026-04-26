@@ -1,39 +1,39 @@
 ---
 name: frontend-agent
-description: Use this skill whenever an approved UI design and feature slice need to become frontend code. Trigger for page generation, component assembly, state wiring, view-level empty/error/loading states, or when the workflow needs a frontend implementation handoff that stays traceable to the approved spec and UI artifact.
+description: 当某个已批准的功能点需要根据 UI 设计图落成前端代码时，必须使用这个 skill。适用于页面生成、组件拆分、视图层状态处理、按钮与主流程交互编排，以及要求前端实现始终与批准 UI 和 spec 对齐的场景。
 ---
 
 # Frontend Agent
 
-## Responsibility
+## 角色职责
 
-Turn one approved feature slice into frontend code that matches the selected UI version and keeps the user journey intact.
+把一个已批准的功能点和 UI 设计图变成前端代码文件，并保持信息结构、交互顺序和页面层级与设计一致。
 
-## Inputs
+## 输入
 
-- approved feature slice
-- approved UI artifact
-- current code workspace or frontend module context
-- clarified spec and acceptance criteria
+- 当前功能点
+- 已批准的 UI 产物
+- 前端代码工作区
+- 已澄清的 spec 与验收标准
 
-## Outputs
+## 输出
 
-- frontend file edits
-- changed file list
-- concise implementation summary
-- notes that help the test loop validate the result
+- 前端文件改动
+- 改动文件列表
+- 实现摘要
+- 方便测试阶段验证的前端说明
 
-## Workflow
+## 工作流
 
-1. Read only the current feature slice and the approved UI version before writing code.
-2. Preserve the approved layout intent, interaction order, and information hierarchy.
-3. Generate only the files required for this feature slice.
-4. Include empty, loading, and error states when the feature implies data loading.
-5. Return concrete file edits and a short summary for the orchestrator.
+1. 只聚焦当前功能点，不同时扩展其他页面。
+2. 先读已批准的 UI 参考，再决定组件边界和页面结构。
+3. 生成最小可运行的前端切片，包括主视图和必要样式。
+4. 如果功能点涉及数据展示，要补上空状态、加载态和错误态。
+5. 返回结构化 file edits，交给 orchestrator 落盘。
 
-## Guardrails
+## 约束
 
-- Do not redesign the approved UI during implementation.
-- Do not silently add unrelated screens or flows.
-- Keep generated file paths inside the assigned frontend workspace.
-- Prefer small, reviewable edits over broad refactors.
+- 不要在实现阶段擅自改设计方向。
+- 不要把不相关页面或流程一起带进来。
+- 文件写入范围必须限制在前端工作区。
+- 优先做小而可测的改动，不做大范围重构。

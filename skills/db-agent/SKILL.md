@@ -1,40 +1,40 @@
 ---
 name: db-agent
-description: Use this skill whenever a feature slice needs a Prisma + PostgreSQL data layer. Trigger for schema design, migrations, seeds, repository methods, or any feature where frontend/backend work depends on persistent data, relationships, or query behavior.
+description: 当一个功能点需要 Prisma + PostgreSQL 数据层时，必须使用这个 skill。适用于 schema 设计、migration、seed、repository 方法、持久化字段与关系建模，以及前后端依赖真实数据闭环的场景。
 ---
 
 # Database Agent
 
-## Responsibility
+## 角色职责
 
-Turn one approved feature slice into a Prisma + PostgreSQL data layer that the backend can call directly.
+把当前功能点变成 Prisma + PostgreSQL 数据层，包括 schema、migration、seed 和 repository。
 
-## Inputs
+## 输入
 
-- approved feature slice
-- clarified requirement and acceptance criteria
-- current database workspace
-- existing Prisma schema and repository context
+- 当前功能点
+- 已澄清的需求与验收标准
+- 数据库代码工作区
+- 已有 Prisma schema 和 repository 上下文
 
-## Outputs
+## 输出
 
-- Prisma schema edits
+- Prisma schema 改动
 - migration SQL
-- seed files
-- repository code
-- concise summary for test and repair loops
+- seed 文件
+- repository 代码
+- 数据层摘要
 
-## Workflow
+## 工作流
 
-1. Identify the minimum entities and fields needed for the current feature slice.
-2. Update Prisma schema without breaking existing feature slices.
-3. Generate migration and seed files that can run in PostgreSQL.
-4. Expose repository methods that make backend usage explicit.
-5. Return concrete file edits plus a short explanation of the data contract.
+1. 先识别这个功能点最小需要哪些实体、字段和关系。
+2. 更新 Prisma schema，并保持对现有功能点兼容。
+3. 生成 migration 与 seed，保证 PostgreSQL 可执行。
+4. 暴露清晰的 repository 方法，供 backend-agent 直接调用。
+5. 返回结构化 file edits，交给 orchestrator 落盘和数据库执行器消费。
 
-## Guardrails
+## 约束
 
-- Keep changes scoped to the current feature.
-- Prefer additive schema evolution over destructive rewrites.
-- Ensure migration and seed output stay aligned with repository methods.
-- Keep all writes inside the assigned database workspace.
+- 只处理当前功能点需要的数据范围。
+- 优先做增量 schema 演化，避免破坏性改动。
+- migration、seed、repository 必须互相对齐。
+- 文件写入范围必须限制在数据库工作区。

@@ -1,28 +1,36 @@
 ---
 name: deploy-agent
-description: Use this skill when acceptance has passed and the system needs a final approval and release decision for the target environment.
+description: 当最终预览已经通过、系统需要决定是否允许发布到目标环境时，必须使用这个 skill。适用于发布前审批、环境选择、阻断项复核，以及把“能不能发”从验收阶段切换到部署阶段的场景。
 ---
 
 # Deploy Agent
 
-## Responsibility
+## 角色职责
 
-Approve or block deployment.
+基于当前验收结果和阻断项状态，判断是否允许发布到目标环境。
 
-## Inputs
+## 输入
 
-- acceptance results
-- open bug count
-- release target
+- 当前 job 状态
+- 验收结果
+- open bug 数量
+- 目标环境信息
 
-## Outputs
+## 输出
 
-- deployment approval
-- target environment
-- release notes
+- 是否批准发布
+- 目标环境
+- 发布判断摘要
 
-## Workflow
+## 工作流
 
-1. Confirm acceptance is complete.
-2. Check for open blockers.
-3. Approve only when the release is safe for the target environment.
+1. 先确认验收已经完成。
+2. 复核当前是否仍有 open bug 或其他发布阻断项。
+3. 给出允许发布或阻断发布的明确结论。
+4. 把环境和结论交给部署执行层。
+
+## 约束
+
+- 不要在有明确阻断项时放行。
+- 不要把实际部署执行逻辑写进 skill。
+- 发布判断必须简洁且可追溯。

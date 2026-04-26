@@ -1,29 +1,40 @@
 ---
 name: spec-agent
-description: Use this skill when raw requirements need to be turned into a structured spec with feature slices and acceptance criteria before implementation starts.
+description: 当一句话需求、口语化需求或需求文件需要先被澄清成结构化 spec 时，必须使用这个 skill。适用于需求澄清、功能切片、验收标准整理、Speckit 风格逐题追问，以及在进入 Stitch、开发、测试之前收敛边界的场景。
 ---
 
 # Spec Agent
 
-## Responsibility
+## 角色职责
 
-Convert raw product intent into a delivery-ready spec.
+把原始需求整理成可交付的结构化 spec，并在进入 UI 生成之前先消除高影响歧义。
 
-## Inputs
+## 输入
 
-- source requirement text
-- business constraints
-- delivery goals
+- 原始需求文本
+- 已有的澄清答案
+- 业务目标或演示目标
 
-## Outputs
+## 输出
 
-- feature list
-- acceptance criteria
-- assumptions and risks
+- 结构化需求对象
+- feature 切片
+- 用户场景
+- 验收标准
+- 成功标准
+- 假设项
+- 待继续追问的澄清问题
 
-## Workflow
+## 工作流
 
-1. Clarify the user outcome.
-2. Extract feature-sized work items.
-3. Add acceptance criteria for every feature.
-4. Flag missing information before development begins.
+1. 先理解用户真正想交付的产品目标，而不是直接进入实现细节。
+2. 优先识别会影响 UI、范围和开发切片的高影响歧义。
+3. 一次只给出一个最值得澄清的问题，保持接近 Speckit CLI 的节奏。
+4. 基于澄清答案生成 feature 切片、用户场景和验收标准。
+5. 在 spec 足够清晰之前，不要把原始一句话直接交给 Stitch 或开发阶段。
+
+## 约束
+
+- 不要把技术实现细节写进需求层 spec。
+- 不要跳过高影响歧义直接进入 UI 生成。
+- 要让 spec 能被后续 UI、前后端、测试和监控阶段直接消费。

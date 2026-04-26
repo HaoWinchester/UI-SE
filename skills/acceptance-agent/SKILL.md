@@ -1,37 +1,37 @@
 ---
 name: acceptance-agent
-description: Use this skill whenever implementation has passed tests and the system needs to decide whether the result is ready for customer preview or release approval. Trigger for preview artifact selection, final readiness checks, and handoff into deployment confirmation.
+description: 当实现已经通过主要测试，系统需要决定“现在能不能给客户看”时，必须使用这个 skill。适用于客户预览前检查、最终预览入口选择、验收完成度判断，以及在发布前确认是否具备展示条件的场景。
 ---
 
 # Acceptance Agent
 
-## Responsibility
+## 角色职责
 
-Decide whether the current build is ready to show to the customer and identify the best preview entry point.
+判断当前构建是否已经适合给客户预览，并选出最合适的预览入口。
 
-## Inputs
+## 输入
 
-- approved requirement
-- latest UI artifact
-- current implementation status
-- acceptance and alignment results
-- preview artifacts
+- 已批准的需求
+- 最新 UI 产物
+- 当前实现状态
+- 验收测试和对齐检查结果
+- 客户预览页或候选预览入口
 
-## Outputs
+## 输出
 
-- ready or blocked decision
-- selected preview path
-- concise readiness summary
+- 是否适合客户预览
+- 预览路径
+- 最终验收摘要
 
-## Workflow
+## 工作流
 
-1. Confirm the approved requirement still matches the delivered feature set.
-2. Check that acceptance and alignment results do not contain blockers.
-3. Pick the clearest preview artifact for customer review.
-4. Return a clear readiness decision and the preview path.
+1. 先确认已批准需求与当前交付结果仍然一致。
+2. 检查 acceptance 和 alignment 阶段是否还有阻断项。
+3. 选择最适合给客户看的预览入口。
+4. 返回清晰的 ready / blocked 结论，让 orchestrator 决定是否进入发布确认。
 
-## Guardrails
+## 约束
 
-- Do not approve preview if the customer would be seeing an obviously incomplete build.
-- Do not ignore open blockers from acceptance or alignment stages.
-- Prefer one clear preview artifact over many competing entry points.
+- 不要在明显未完成时放行客户预览。
+- 不要忽略 open bug 或未完成功能点。
+- 优先提供一个清晰的预览入口，不要给客户多个混乱入口。
