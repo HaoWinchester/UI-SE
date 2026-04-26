@@ -27,6 +27,17 @@ export interface StitchSubmission {
   note?: string;
 }
 
+export interface StitchScreenPrompt {
+  name: string;
+  prompt: string;
+  relatedFeatureIds?: string[];
+}
+
+export interface StitchSubmitRequest {
+  prompt: string;
+  screenPrompts?: StitchScreenPrompt[];
+}
+
 export interface StitchDownloadResult {
   // downloadPath 统一表示“当前阶段最主要的可消费产物路径”。
   downloadPath: string;
@@ -43,13 +54,14 @@ export interface StitchDownloadResult {
 }
 
 export interface StitchClient {
-  submit(prompt: string): Promise<StitchSubmission>;
+  submit(request: StitchSubmitRequest): Promise<StitchSubmission>;
   getStatus(stitchJobId: string): Promise<StitchJobStatus>;
   downloadResult(stitchJobId: string, targetDir: string): Promise<StitchDownloadResult>;
 }
 
 interface MockStitchRecord {
   prompt: string;
+  screenPrompts: StitchScreenPrompt[];
   polls: number;
 }
 
@@ -66,9 +78,11 @@ interface RealStitchClientOptions {
 
 interface RealStitchRecord {
   prompt: string;
+  screenPrompts: StitchScreenPrompt[];
   status: StitchJobStatus;
   projectId?: string;
   screenId?: string;
+  screenIds?: string[];
   htmlUrl?: string;
   imageUrl?: string;
 }
@@ -78,10 +92,14 @@ export class MockStitchClient implements StitchClient {
 
   constructor(private readonly note?: string) {}
 
-  async submit(prompt: string): Promise<StitchSubmission> {
+  async submit(request: StitchSubmitRequest): Promise<StitchSubmission> {
     // mock 模式下只记录 prompt，不会真的请求 Stitch。
     const stitchJobId = `stitch-${randomUUID()}`;
-    this.jobs.set(stitchJobId, { prompt, polls: 0 });
+    this.jobs.set(stitchJobId, {
+      prompt: request.prompt,
+      screenPrompts: request.screenPrompts ?? [{ name: "Primary Screen", prompt: request.prompt }],
+      polls: 0,
+    });
     return { stitchJobId, runtime: "mock", note: this.note };
   }
 
@@ -112,29 +130,44 @@ export class MockStitchClient implements StitchClient {
 
     await mkdir(targetDir, { recursive: true });
 
-    const htmlPath = path.join(targetDir, `${stitchJobId}.html`);
-    const imagePath = path.join(targetDir, `${stitchJobId}.png`);
     const metadataPath = path.join(targetDir, `${stitchJobId}.json`);
-    const mockHtml = [
-      "<!doctype html>",
-      "<html lang=\"en\">",
-      "  <head>",
-      "    <meta charset=\"utf-8\" />",
-      `    <title>${stitchJobId}</title>`,
-      "  </head>",
-      "  <body>",
-      "    <main>",
-      "      <h1>Mock Stitch UI Result</h1>",
-      `      <pre>${job.prompt}</pre>`,
-      "    </main>",
-      "  </body>",
-      "</html>",
-    ].join("\n");
+    const screensDir = path.join(targetDir, "screens");
+    await mkdir(screensDir, { recursive: true });
+    const mockScreens = await Promise.all(
+      job.screenPrompts.map(async (screenPrompt, index) => {
+        const screenId = `${stitchJobId}-screen-${index + 1}`;
+        const htmlPath = path.join(screensDir, `${String(index + 1).padStart(2, "0")}-${screenId}.html`);
+        const imagePath = path.join(screensDir, `${String(index + 1).padStart(2, "0")}-${screenId}.png`);
+        const mockHtml = [
+          "<!doctype html>",
+          "<html lang=\"en\">",
+          "  <head>",
+          "    <meta charset=\"utf-8\" />",
+          `    <title>${screenPrompt.name}</title>`,
+          "  </head>",
+          "  <body>",
+          "    <main>",
+          `      <h1>${screenPrompt.name}</h1>`,
+          `      <pre>${screenPrompt.prompt}</pre>`,
+          "    </main>",
+          "  </body>",
+          "</html>",
+        ].join("\n");
+        await writeFile(htmlPath, mockHtml, "utf8");
+        await writeFile(imagePath, ONE_PIXEL_PNG);
+        return {
+          order: index + 1,
+          screenId,
+          htmlPath,
+          imagePath,
+        };
+      }),
+    );
+    const htmlPath = mockScreens[0]?.htmlPath ?? path.join(targetDir, `${stitchJobId}.html`);
+    const imagePath = mockScreens[0]?.imagePath ?? path.join(targetDir, `${stitchJobId}.png`);
 
     // mock 产物格式尽量和真实 Stitch 保持一致，
     // 这样 orchestrator 就不用区分两套流程。
-    await writeFile(htmlPath, mockHtml, "utf8");
-    await writeFile(imagePath, ONE_PIXEL_PNG);
     await writeFile(
       metadataPath,
       JSON.stringify(
@@ -144,6 +177,7 @@ export class MockStitchClient implements StitchClient {
           prompt: job.prompt,
           htmlPath,
           imagePath,
+          screens: mockScreens,
           note: this.note,
         },
         null,
@@ -157,14 +191,7 @@ export class MockStitchClient implements StitchClient {
       htmlPath,
       imagePath,
       metadataPath,
-      screens: [
-        {
-          order: 1,
-          screenId: stitchJobId,
-          htmlPath,
-          imagePath,
-        },
-      ],
+      screens: mockScreens,
       note: this.note,
     };
   }
@@ -187,27 +214,42 @@ export class RealStitchClient implements StitchClient {
     this.sdk = new Stitch(client);
   }
 
-  async submit(prompt: string): Promise<StitchSubmission> {
+  async submit(request: StitchSubmitRequest): Promise<StitchSubmission> {
     // 真实模式下，submit 会真正去创建项目/生成 screen。
     const stitchJobId = `stitch-${randomUUID()}`;
-    this.jobs.set(stitchJobId, { prompt, status: "queued" });
+    const screenPrompts = request.screenPrompts?.length
+      ? request.screenPrompts
+      : [{ name: "Primary Screen", prompt: request.prompt }];
+    this.jobs.set(stitchJobId, { prompt: request.prompt, screenPrompts, status: "queued" });
 
     try {
-      const project = await this.resolveProject(prompt);
+      const project = await this.resolveProject(request.prompt);
       this.jobs.set(stitchJobId, {
-        prompt,
+        prompt: request.prompt,
+        screenPrompts,
         status: "running",
         projectId: project.projectId,
       });
 
-      const screen = await project.generate(prompt, this.options.deviceType, this.options.modelId);
-      const [htmlUrl, imageUrl] = await Promise.all([screen.getHtml(), screen.getImage()]);
+      const generatedScreens = [];
+      for (const screenPrompt of screenPrompts) {
+        generatedScreens.push(
+          await project.generate(screenPrompt.prompt, this.options.deviceType, this.options.modelId),
+        );
+      }
+      const primaryScreen = generatedScreens[0];
+      const [htmlUrl, imageUrl] = await Promise.all([
+        primaryScreen.getHtml(),
+        primaryScreen.getImage(),
+      ]);
 
       this.jobs.set(stitchJobId, {
-        prompt,
+        prompt: request.prompt,
+        screenPrompts,
         status: "completed",
         projectId: project.projectId,
-        screenId: screen.screenId,
+        screenId: primaryScreen.screenId,
+        screenIds: generatedScreens.map((screen) => screen.screenId),
         htmlUrl,
         imageUrl,
       });
@@ -215,12 +257,13 @@ export class RealStitchClient implements StitchClient {
       return {
         stitchJobId,
         projectId: project.projectId,
-        screenId: screen.screenId,
+        screenId: primaryScreen.screenId,
         runtime: "real",
       };
     } catch (error) {
       this.jobs.set(stitchJobId, {
-        prompt,
+        prompt: request.prompt,
+        screenPrompts,
         status: "failed",
       });
       throw new Error(`Stitch submission failed: ${formatError(error)}`);
@@ -346,13 +389,13 @@ export class FallbackStitchClient implements StitchClient {
     private readonly fallback: StitchClient,
   ) {}
 
-  async submit(prompt: string): Promise<StitchSubmission> {
+  async submit(request: StitchSubmitRequest): Promise<StitchSubmission> {
     // 优先尝试真实 Stitch；失败时自动降级为 mock，保证主流程不中断。
     try {
-      return await this.primary.submit(prompt);
+      return await this.primary.submit(request);
     } catch (error) {
       const reason = `Real Stitch unavailable, fell back to mock output: ${formatError(error)}`;
-      const submission = await this.fallback.submit(prompt);
+      const submission = await this.fallback.submit(request);
       this.fallbackReasons.set(submission.stitchJobId, reason);
       return {
         ...submission,

@@ -13,6 +13,11 @@ export interface UiAgentInput {
 
 export interface UiAgentOutput {
   prompt: string;
+  screenPrompts: Array<{
+    name: string;
+    prompt: string;
+    relatedFeatureIds: string[];
+  }>;
   targetUrl: string;
   checklist: string[];
 }
@@ -47,6 +52,17 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
     const assumptionsList = requirement.assumptions
       .map((item, index) => `${index + 1}. ${item}`)
       .join("\n");
+
+    const featureSlices = requirement.features.map((feature, index) => ({
+      name: feature.name,
+      featureId: feature.id,
+      prompt: [
+        `Screen ${index + 1}: ${feature.name}`,
+        `Focus: ${feature.description}`,
+        `Acceptance criteria: ${feature.acceptanceCriteria.join(" / ")}`,
+        `Related user journey: ${requirement.userScenarios[index] ?? requirement.userScenarios[0] ?? requirement.summary}`,
+      ].join("\n"),
+    }));
 
     const clarifiedSpec = [
       `产品名称：${requirement.title}`,
@@ -100,6 +116,31 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
       risks: [],
       data: {
         prompt,
+        screenPrompts: [
+          {
+            name: "Landing Experience",
+            relatedFeatureIds: requirement.features.slice(0, 1).map((feature) => feature.id),
+            prompt: [
+              prompt,
+              "",
+              "Screen focus:",
+              "- This is the primary landing experience / home page.",
+              "- Establish the product brand, global navigation, and top-level entry points.",
+              "- Make the main user journey immediately visible on this page.",
+            ].join("\n"),
+          },
+          ...featureSlices.map((screen) => ({
+            name: screen.name,
+            relatedFeatureIds: [screen.featureId],
+            prompt: [
+              prompt,
+              "",
+              "Screen focus:",
+              screen.prompt,
+              "- Keep this screen linked to the rest of the flow through obvious navigation or CTA relationships.",
+            ].join("\n"),
+          })),
+        ],
         targetUrl: "https://stitch.withgoogle.com/",
         checklist: [
           "Submit only after the requirement has been clarified into a concrete spec.",

@@ -494,7 +494,10 @@ export class DeliveryOrchestrator {
         designFeedback,
       });
 
-      const submission = await this.deps.stitchClient.submit(uiPreparation.data.prompt);
+      const submission = await this.deps.stitchClient.submit({
+        prompt: uiPreparation.data.prompt,
+        screenPrompts: uiPreparation.data.screenPrompts,
+      });
       await this.transition(
         jobId,
         "ui_generating",
