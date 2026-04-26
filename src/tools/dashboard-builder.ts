@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { agentTeams } from "../config/agent-teams.js";
 import type { DashboardArtifact, WorkflowJob, WorkflowLogEntry } from "../types/domain.js";
 
 export interface DashboardBuilder {
@@ -75,6 +76,7 @@ function buildDashboardHtml(
           <div class="timeline-head">
             <span class="badge level-${entry.level}">${escapeHtml(entry.level)}</span>
             <span class="stage">${escapeHtml(entry.stage)}</span>
+            ${entry.teamLabel ? `<span class="badge">${escapeHtml(entry.teamLabel)}</span>` : ""}
             <time>${escapeHtml(entry.createdAt)}</time>
           </div>
           <div class="timeline-body">${escapeHtml(entry.message)}</div>
@@ -130,6 +132,26 @@ function buildDashboardHtml(
           <p class="muted">执行耗时：${run.durationMs}ms</p>
           <p><a href="${toFileHref(path.join(baseDir, run.logPath))}">打开数据库执行记录</a></p>
         </article>
+      `,
+    )
+    .join("");
+
+  const currentTeamLabel = job.currentTeam ? agentTeams[job.currentTeam]?.label ?? job.currentTeam : "未分配";
+  const teamHistoryItems = job.teamHistory
+    .map(
+      (handoff) => `
+        <li class="timeline-item">
+          <div class="timeline-head">
+            <span class="badge">${escapeHtml(agentTeams[handoff.toTeam]?.label ?? handoff.toTeam)}</span>
+            <time>${escapeHtml(handoff.createdAt)}</time>
+          </div>
+          <div class="timeline-body">${escapeHtml(handoff.reason)}</div>
+          ${
+            handoff.fromTeam
+              ? `<div class="muted" style="margin-top: 6px;">来自 ${escapeHtml(agentTeams[handoff.fromTeam]?.label ?? handoff.fromTeam)}</div>`
+              : ""
+          }
+        </li>
       `,
     )
     .join("");
@@ -212,7 +234,7 @@ function buildDashboardHtml(
       }
       .hero-meta {
         display: grid;
-        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        grid-template-columns: repeat(5, minmax(120px, 1fr));
         gap: 12px;
         width: 100%;
       }
@@ -376,13 +398,14 @@ function buildDashboardHtml(
         <div>
           <p class="muted">工作流面板</p>
           <h1>任务 ${escapeHtml(job.id)}</h1>
-          <p class="muted" style="margin-top: 10px;">${escapeHtml(job.requirement.title)} · 当前阶段 ${escapeHtml(job.stage)} · 更新时间 ${escapeHtml(job.updatedAt)}</p>
+          <p class="muted" style="margin-top: 10px;">${escapeHtml(job.requirement.title)} · 当前阶段 ${escapeHtml(job.stage)} · 当前 Team ${escapeHtml(currentTeamLabel)} · 更新时间 ${escapeHtml(job.updatedAt)}</p>
           <p style="margin-top: 12px; line-height: 1.7;">${escapeHtml(job.requirement.summary)}</p>
           <p class="muted" style="margin-top: 12px;">面板生成时间：${escapeHtml(generatedAt)}</p>
         </div>
         <div class="hero-meta">
           <div class="stat"><div class="stat-label">功能点</div><div class="stat-value">${job.requirement.features.length}</div></div>
           <div class="stat"><div class="stat-label">Agent 执行</div><div class="stat-value">${job.agentRuns.length}</div></div>
+          <div class="stat"><div class="stat-label">Team 交接</div><div class="stat-value">${job.teamHistory.length}</div></div>
           <div class="stat"><div class="stat-label">数据库执行</div><div class="stat-value">${job.databaseRuns.length}</div></div>
           <div class="stat"><div class="stat-label">部署状态</div><div class="stat-value" style="font-size:16px;">${escapeHtml(deploymentSummary)}</div></div>
         </div>
@@ -412,6 +435,14 @@ function buildDashboardHtml(
         </section>
 
         <section class="stack">
+          <section class="card">
+            <div class="section-head">
+              <h2>Team 编排</h2>
+              <span class="muted">${escapeHtml(currentTeamLabel)}</span>
+            </div>
+            <ul class="timeline">${teamHistoryItems || '<li class="timeline-item"><div class="timeline-body">当前还没有 team 交接记录。</div></li>'}</ul>
+          </section>
+
           <section class="card">
             <div class="section-head">
               <h2>数据库执行记录</h2>

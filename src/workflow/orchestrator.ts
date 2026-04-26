@@ -13,6 +13,12 @@ import { DeployAgent } from "../agents/deploy-agent.js";
 import { FixAgent } from "../agents/fix-agent.js";
 import { FrontendAgent } from "../agents/frontend-agent.js";
 import { MonitorAgent } from "../agents/monitor-agent.js";
+import {
+  agentTeams,
+  type AgentTeamConfig,
+  type TeamName,
+  teamExecutionOrder,
+} from "../config/agent-teams.js";
 import type {
   SpecClarificationAnswer,
   SpecClarificationQuestion,
@@ -40,6 +46,7 @@ import type {
   JobStage,
   ReleaseApprovalRecord,
   SpecArtifact,
+  TeamHandoffRecord,
   TestRun,
   UiArtifact,
   WorkflowJob,
@@ -250,6 +257,14 @@ export class DeliveryOrchestrator {
     const job: WorkflowJob = {
       id: jobId,
       requirement: specExecution.result.data.requirement,
+      currentTeam: "requirement-design-team",
+      teamHistory: [
+        {
+          toTeam: "requirement-design-team",
+          reason: "Job created and entered requirement clarification.",
+          createdAt: now,
+        },
+      ],
       codeWorkspace,
       logFilePath,
       specArtifact,
@@ -278,6 +293,8 @@ export class DeliveryOrchestrator {
       level: "info",
       stage: "drafting_spec",
       message: "Job created and initial spec clarification completed.",
+      teamName: "requirement-design-team",
+      teamLabel: agentTeams["requirement-design-team"].label,
       details: {
         specPath: specArtifact.markdownPath,
         clarificationCount: clarificationAnswers.length,
@@ -290,6 +307,11 @@ export class DeliveryOrchestrator {
 
   async run(jobId: string): Promise<WorkflowJob> {
     // 这是主流程入口：先生成并确认 UI，再进入开发、测试、验收和部署。
+    await this.enterTeam(
+      jobId,
+      "requirement-design-team",
+      "Entering requirement and design team for approved spec handoff and UI generation.",
+    );
     const initialJob = await this.deps.store.get(jobId);
     await this.transition(
       jobId,
@@ -303,6 +325,11 @@ export class DeliveryOrchestrator {
     const approvedUiArtifact = await this.generateApprovedUi(jobId);
     this.notifyProgress(`已确认第 ${approvedUiArtifact.versionNumber} 版 UI，开始进入功能开发阶段。`);
 
+    await this.enterTeam(
+      jobId,
+      "delivery-team",
+      "UI approval completed. Handoff to delivery team for feature implementation.",
+    );
     let job = await this.deps.store.get(jobId);
     for (const feature of job.requirement.features) {
       const result = await this.developFeature(jobId, feature.id);
@@ -312,6 +339,11 @@ export class DeliveryOrchestrator {
     }
 
     job = await this.deps.store.get(jobId);
+    await this.enterTeam(
+      jobId,
+      "quality-team",
+      "All feature slices are implemented. Handoff to quality team for flow-level verification.",
+    );
     await this.transition(
       jobId,
       "running_flow_tests",
@@ -348,6 +380,11 @@ export class DeliveryOrchestrator {
     }
 
     job = await this.deps.store.get(jobId);
+    await this.enterTeam(
+      jobId,
+      "release-team",
+      "Quality team passed the build. Handoff to release team for final acceptance and deployment approval.",
+    );
     await this.transition(
       jobId,
       "running_acceptance",
@@ -536,6 +573,11 @@ export class DeliveryOrchestrator {
     let job = await this.deps.store.get(jobId);
     const feature = this.requireFeature(job, featureId);
 
+    await this.enterTeam(
+      jobId,
+      "delivery-team",
+      `Starting delivery work for feature "${feature.name}".`,
+    );
     await this.transition(jobId, "implementing_feature", `Implementing feature "${feature.name}".`);
     await this.updateFeature(jobId, featureId, (current) => ({
       ...current,
@@ -594,6 +636,11 @@ export class DeliveryOrchestrator {
       return this.blockJob(jobId, initialDatabaseRun.summary);
     }
 
+    await this.enterTeam(
+      jobId,
+      "quality-team",
+      `Delivery work for "${refreshedFeature.name}" completed. Handoff to quality team for test and alignment loop.`,
+    );
     await this.transition(
       jobId,
       "testing_feature",
@@ -876,7 +923,12 @@ export class DeliveryOrchestrator {
     return {
       context,
       result,
-      record: buildAgentRunRecord(agent.definition, context, result),
+      record: buildAgentRunRecord(
+        agent.definition,
+        context,
+        result,
+        this.findTeamByAgent(agent.definition.name),
+      ),
     };
   }
 
@@ -886,7 +938,9 @@ export class DeliveryOrchestrator {
     agent: Agent<Input, Output>,
     input: Input,
   ): Promise<AgentResult<Output>> {
-    this.notifyProgress(`正在执行 ${agent.definition.name}。`);
+    const team = this.findTeamByAgent(agent.definition.name);
+    await this.enterTeam(jobId, team.name, `Routing ${agent.definition.name} through ${team.label}.`);
+    this.notifyProgress(`正在执行 ${team.label} / ${agent.definition.name}。`);
     const execution = await this.prepareAgentRun(jobId, stage, agent, input);
     if (execution.result.fileEdits.length > 0) {
       const appliedFiles = await this.deps.repoWriter.applyFileEdits(execution.result.fileEdits);
@@ -904,6 +958,8 @@ export class DeliveryOrchestrator {
           stage,
           message: formatAgentEvent(execution.record),
           createdAt: execution.record.createdAt,
+          teamName: execution.record.teamName,
+          teamLabel: execution.record.teamLabel,
         },
       ],
     }));
@@ -912,6 +968,8 @@ export class DeliveryOrchestrator {
       level: execution.result.status === "blocked" ? "warn" : "info",
       stage,
       message: `${agent.definition.name}: ${execution.result.summary}`,
+      teamName: execution.record.teamName,
+      teamLabel: execution.record.teamLabel,
       details: {
         nextAction: execution.result.nextAction,
         changedFiles: execution.result.changedFiles,
@@ -924,16 +982,21 @@ export class DeliveryOrchestrator {
   }
 
   private async transition(jobId: string, stage: JobStage, message: string): Promise<void> {
-    this.notifyProgress(`[${stage}] ${message}`);
+    const stageTeam = this.resolveTeamForStage(stage);
+    const teamLabel = stageTeam ? agentTeams[stageTeam].label : undefined;
+    this.notifyProgress(stageTeam ? `[${teamLabel} / ${stage}] ${message}` : `[${stage}] ${message}`);
     await this.deps.store.update(jobId, (current) => ({
       ...current,
       stage,
+      currentTeam: stageTeam ?? current.currentTeam,
       events: [
         ...current.events,
         {
           stage,
           message,
           createdAt: new Date().toISOString(),
+          teamName: stageTeam ?? current.currentTeam,
+          teamLabel,
         },
       ],
     }));
@@ -942,6 +1005,8 @@ export class DeliveryOrchestrator {
       level: stage === "blocked" ? "error" : "info",
       stage,
       message,
+      teamName: stageTeam,
+      teamLabel,
     });
     await this.refreshDashboard(jobId);
   }
@@ -971,6 +1036,8 @@ export class DeliveryOrchestrator {
           stage: current.stage,
           message: `Test run (${testRun.scope}): ${testRun.summary}`,
           createdAt: testRun.createdAt,
+          teamName: current.currentTeam,
+          teamLabel: current.currentTeam ? agentTeams[current.currentTeam].label : undefined,
         },
       ],
     }));
@@ -979,6 +1046,8 @@ export class DeliveryOrchestrator {
       level: testRun.passed ? "info" : "warn",
       stage: "testing_feature",
       message: `Test run (${testRun.scope}): ${testRun.summary}`,
+      teamName: "quality-team",
+      teamLabel: agentTeams["quality-team"].label,
       details: {
         targetId: testRun.targetId,
         passed: testRun.passed,
@@ -1003,6 +1072,8 @@ export class DeliveryOrchestrator {
             ? "Customer approved the final preview for release."
             : `Customer rejected the final preview.${releaseApproval.feedback ? ` Feedback: ${releaseApproval.feedback}` : ""}`,
           createdAt: releaseApproval.decidedAt,
+          teamName: current.currentTeam,
+          teamLabel: current.currentTeam ? agentTeams[current.currentTeam].label : undefined,
         },
       ],
     }));
@@ -1013,6 +1084,8 @@ export class DeliveryOrchestrator {
       message: releaseApproval.approved
         ? "Customer approved the final preview for release."
         : "Customer rejected the final preview.",
+      teamName: "release-team",
+      teamLabel: agentTeams["release-team"].label,
       details: {
         feedback: releaseApproval.feedback,
         previewPath: releaseApproval.previewPath,
@@ -1070,6 +1143,8 @@ export class DeliveryOrchestrator {
           stage: input.stage,
           message: `Recorded failure memory for ${featureId} at step "${input.step}": ${input.testRun.summary}`,
           createdAt: input.testRun.createdAt,
+          teamName: current.currentTeam,
+          teamLabel: current.currentTeam ? agentTeams[current.currentTeam].label : undefined,
         },
       ],
     }));
@@ -1079,6 +1154,8 @@ export class DeliveryOrchestrator {
       level: "warn",
       stage: input.stage,
       message: `Recorded failure memory for ${featureId} at step "${input.step}".`,
+      teamName: "quality-team",
+      teamLabel: agentTeams["quality-team"].label,
       details: {
         summary: input.testRun.summary,
         bugTitles: input.testRun.bugs.map((bug) => bug.title),
@@ -1234,6 +1311,8 @@ export class DeliveryOrchestrator {
       level: input.aligned ? "info" : "warn",
       stage: "verifying_alignment",
       message: `Alignment report saved: ${filePath}`,
+      teamName: "quality-team",
+      teamLabel: agentTeams["quality-team"].label,
       details: {
         scope: input.scope,
         featureId: input.featureId,
@@ -1290,6 +1369,8 @@ export class DeliveryOrchestrator {
       level: "warn",
       stage: "verifying_alignment",
       message: `Detected alignment drift for feature "${feature.name}", entering targeted repair.`,
+      teamName: "quality-team",
+      teamLabel: agentTeams["quality-team"].label,
       details: {
         featureId: feature.id,
         findings: driftBugReports.map((bug) => bug.title),
@@ -1332,6 +1413,8 @@ export class DeliveryOrchestrator {
           stage: current.stage,
           message: `Database run (${databaseRun.status}): ${databaseRun.summary}`,
           createdAt: databaseRun.executedAt,
+          teamName: current.currentTeam,
+          teamLabel: current.currentTeam ? agentTeams[current.currentTeam].label : undefined,
         },
       ],
     }));
@@ -1340,6 +1423,8 @@ export class DeliveryOrchestrator {
       level: databaseRun.status === "applied" ? "info" : "error",
       stage: "implementing_feature",
       message: `Database run (${databaseRun.status}): ${databaseRun.summary}`,
+      teamName: "delivery-team",
+      teamLabel: agentTeams["delivery-team"].label,
       details: {
         featureId: databaseRun.featureId,
         databaseUrl: databaseRun.databaseUrl,
@@ -1364,6 +1449,8 @@ export class DeliveryOrchestrator {
       level: "info",
       stage: "previewing_release",
       message: `Customer preview is ready at ${customerPreviewArtifact.serverUrl}.`,
+      teamName: "release-team",
+      teamLabel: agentTeams["release-team"].label,
       details: {
         htmlPath: customerPreviewArtifact.htmlPath,
         port: customerPreviewArtifact.port,
@@ -1410,6 +1497,91 @@ export class DeliveryOrchestrator {
   private async blockJob(jobId: string, reason: string): Promise<WorkflowJob> {
     await this.transition(jobId, "blocked", reason);
     return this.deps.store.get(jobId);
+  }
+
+  private async enterTeam(jobId: string, teamName: TeamName, reason: string): Promise<void> {
+    const current = await this.deps.store.get(jobId);
+    if (current.currentTeam === teamName) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const targetTeam = agentTeams[teamName];
+    const handoff: TeamHandoffRecord = {
+      fromTeam: current.currentTeam,
+      toTeam: teamName,
+      reason,
+      createdAt,
+    };
+
+    await this.deps.store.update(jobId, (job) => ({
+      ...job,
+      currentTeam: teamName,
+      teamHistory: [...job.teamHistory, handoff],
+      events: [
+        ...job.events,
+        {
+          stage: job.stage,
+          message: `Team handoff: ${targetTeam.label}. ${reason}`,
+          createdAt,
+          teamName,
+          teamLabel: targetTeam.label,
+        },
+      ],
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt,
+      level: "info",
+      stage: current.stage,
+      message: `Team handoff: ${targetTeam.label}.`,
+      teamName,
+      teamLabel: targetTeam.label,
+      details: {
+        fromTeam: current.currentTeam,
+        toTeam: teamName,
+        reason,
+      },
+    });
+    this.notifyProgress(`已切换到 ${targetTeam.label}。`);
+    await this.refreshDashboard(jobId);
+  }
+
+  private resolveTeamForStage(stage: JobStage): TeamName | undefined {
+    switch (stage) {
+      case "drafting_spec":
+      case "spec_confirmed":
+      case "ui_generating":
+      case "ui_ready":
+      case "reviewing_ui":
+        return "requirement-design-team";
+      case "implementing_feature":
+        return "delivery-team";
+      case "testing_feature":
+      case "fixing_feature":
+      case "running_flow_tests":
+      case "verifying_alignment":
+        return "quality-team";
+      case "running_acceptance":
+      case "previewing_release":
+      case "deploying":
+      case "done":
+        return "release-team";
+      case "blocked":
+        return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  private findTeamByAgent(agentName: AgentDefinition["name"]): AgentTeamConfig {
+    for (const teamName of teamExecutionOrder) {
+      const team = agentTeams[teamName];
+      if (team.members.some((member) => member.agent === agentName)) {
+        return team;
+      }
+    }
+
+    return agentTeams["quality-team"];
   }
 
   private shouldReapplyDatabase(changedFiles: string[]): boolean {
@@ -1482,9 +1654,12 @@ function buildAgentRunRecord<Input, Output>(
   definition: AgentDefinition,
   context: AgentExecutionContext,
   result: AgentResult<Output>,
+  team: AgentTeamConfig,
 ): AgentRunRecord {
   return {
     agentName: definition.name,
+    teamName: team.name,
+    teamLabel: team.label,
     stage: context.stage,
     status: result.status,
     runtimeMode: context.runtimeMode,
@@ -1504,7 +1679,7 @@ function buildAgentRunRecord<Input, Output>(
 }
 
 function formatAgentEvent(record: AgentRunRecord): string {
-  return `${record.agentName}: ${record.summary} Next: ${record.nextAction}.`;
+  return `${record.teamLabel ?? "Unknown Team"} / ${record.agentName}: ${record.summary} Next: ${record.nextAction}.`;
 }
 
 function mergeBugReports(existing: BugReport[], incoming: BugReport[]): BugReport[] {

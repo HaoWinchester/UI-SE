@@ -147,6 +147,7 @@ npm run dev -- --yes --no-open
 
 - 工作流日志：`artifacts/logs/<jobId>/workflow.jsonl`
 - 偏航报告：`artifacts/alignment-reports/<jobId>/*.json`
+- team 交接信息：任务状态、日志和 dashboard 中都会带出当前 team 与 handoff 记录
 
 其中：
 
@@ -167,6 +168,7 @@ npm run dev -- --yes --no-open
 面板里会汇总：
 
 - 当前需求摘要和阶段
+- 当前 team 和 team handoff 时间线
 - 最新 UI 预览
 - 功能点状态
 - PostgreSQL 执行记录

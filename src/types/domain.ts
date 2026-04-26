@@ -1,3 +1,5 @@
+import type { TeamName } from "../config/agent-teams.js";
+
 // 这个文件收敛了整套系统的核心领域模型。
 // 任务、功能点、测试记录、UI 产物、失败记忆等状态都会在这里定义。
 // 下面这些类型定义的是整个工作流里的核心数据结构。
@@ -136,6 +138,8 @@ export interface WorkflowLogEntry {
   level: WorkflowLogLevel;
   stage: JobStage;
   message: string;
+  teamName?: TeamName;
+  teamLabel?: string;
   details?: Record<string, unknown>;
 }
 
@@ -250,11 +254,23 @@ export interface JobEvent {
   stage: JobStage;
   message: string;
   createdAt: string;
+  teamName?: TeamName;
+  teamLabel?: string;
+}
+
+// 记录 orchestrator 在不同 team 之间的交接，方便查看整条链路的协作节奏。
+export interface TeamHandoffRecord {
+  fromTeam?: TeamName;
+  toTeam: TeamName;
+  reason: string;
+  createdAt: string;
 }
 
 // 一次 agent 执行的记录，方便排查问题。
 export interface AgentRunRecord {
   agentName: string;
+  teamName?: TeamName;
+  teamLabel?: string;
   stage: JobStage;
   status: "completed" | "blocked";
   runtimeMode: "mock" | "model";
@@ -277,6 +293,8 @@ export interface WorkflowJob {
   id: string;
   requirement: ProductRequirement;
   stage: JobStage;
+  currentTeam?: TeamName;
+  teamHistory: TeamHandoffRecord[];
   codeWorkspace: CodeWorkspace;
   logFilePath: string;
   dashboardArtifact?: DashboardArtifact;

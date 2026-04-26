@@ -125,9 +125,9 @@ flowchart TD
   F1 --> F2["deploy-agent"]
 ```
 
-## 当前配置稿位置
+## 当前配置位置
 
-如果你想把这套 team 真接进运行时，当前的配置稿已经放在：
+这套 team 配置现在已经放在：
 
 - [src/config/agent-teams.ts](/Users/menghao/Documents/幻谱/官网演示项目/UI-SE/src/config/agent-teams.ts)
 
@@ -140,9 +140,23 @@ flowchart TD
 - 输入输出约束
 - 上下游 team 交接关系
 
-## 这份配置稿可以怎么用
+## 当前已经接入的部分
 
-后面真正接 team runtime 时，最自然的落法是：
+当前 orchestrator 已经开始消费这份配置，用于：
+
+- 判断当前阶段属于哪支 team
+- 在不同 team 之间记录 handoff
+- 给 agent run、workflow log、dashboard、CLI 输出附带 team 上下文
+
+也就是说，现在已经不是“只有文档和配置”，而是：
+
+- 运行任务时会看到当前 team
+- dashboard 会显示 team handoff 时间线
+- agent 执行记录会带上 team 信息
+
+## 这份配置后面还能怎么用
+
+接下来最自然的继续落法是：
 
 1. `orchestrator` 根据当前 stage 选中某个 team
 2. 读取 `agent-teams.ts` 判断这支 team 的执行模式
@@ -160,6 +174,9 @@ flowchart TD
 
 所以现在这一步是：
 
-**你已经有一套适合启动 agent teams 的 skill 包和配置稿**
+**你已经有一套可运行的 team 分组与交接骨架。**
 
-接下来再往前走，就是把 `src/config/agent-teams.ts` 真正接进 orchestrator 的调度逻辑里。
+下一步如果继续往前推，重点就不再是“有没有 team”，而是：
+
+- 是否按 `executionMode` 做真正并行
+- 是否把 team 配置进一步下沉到更细的任务分发逻辑

@@ -52,9 +52,9 @@ The team-level grouping draft lives in `src/config/agent-teams.ts`.
 
 The orchestrator validates every agent-reported write path against the declared `writeScopes`. This is not a full sandbox yet, but it keeps the contract explicit and makes it much easier to upgrade to stricter execution later.
 
-## Team orchestration draft
+## Team orchestration
 
-The current repository also includes a team-level draft:
+The current repository also includes and actively uses a team-level layer:
 
 - requirement-design team
 - delivery team
@@ -67,3 +67,10 @@ This layer does not replace the per-agent runtime contract. It sits above it and
 - which members can run in parallel
 - which members must stay serial
 - what artifacts a team shares before handing off to the next team
+
+The orchestrator already uses this layer to:
+
+- tag the current active team on the job state
+- record team handoffs in workflow history
+- attach team context to agent runs and workflow logs
+- surface current team and handoff information in the dashboard and CLI output

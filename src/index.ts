@@ -90,6 +90,8 @@ async function main(): Promise<void> {
     console.log(`Features: ${result.requirement.features.length}`);
     console.log(`UI versions: ${result.uiArtifacts.length}`);
     console.log(`Selected UI version: ${result.uiArtifact?.versionNumber ?? "none"}`);
+    console.log(`Current team: ${result.currentTeam ?? "none"}`);
+    console.log(`Team handoffs: ${result.teamHistory.length}`);
     console.log(`Agent runs: ${result.agentRuns.length}`);
     console.log(`Open bugs: ${result.bugReports.filter((bug) => bug.status === "open").length}`);
     console.log(`Workflow log: ${path.join(workspaceRoot, result.logFilePath)}`);
