@@ -279,29 +279,397 @@ async function buildApprovedUiLanding(
 ): Promise<string> {
   const sourceHtml = await readFile(absoluteApprovedUiPath, "utf8");
   const primaryFeature = job.requirement.features[0];
-  const detailTarget = primaryFeature
-    ? `./runtime.html#detail/${slugifyBrowserRoute(primaryFeature.name) || primaryFeature.id}`
-    : "./runtime.html#catalog";
   const bridgeConfig = JSON.stringify({
-    catalog: "./runtime.html#catalog",
-    detail: detailTarget,
-    home: "./runtime.html#home",
+    primaryFeatureId: primaryFeature?.id,
+    runtimeHome: "./runtime.html#home",
+    runtimeCatalog: "./runtime.html#catalog",
   });
   const bridgeScript = `
+<style>
+  #ui-se-overlay-root {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+  }
+  #ui-se-overlay-root[data-open="true"] {
+    pointer-events: auto;
+  }
+  .ui-se-overlay-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 6, 10, 0.72);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+  .ui-se-overlay-panel {
+    position: absolute;
+    inset: 5vh 4vw;
+    overflow: hidden;
+    border-radius: 28px;
+    border: 1px solid rgba(155, 168, 255, 0.18);
+    background:
+      linear-gradient(180deg, rgba(17, 17, 23, 0.98), rgba(8, 8, 12, 0.98));
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.46);
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+  .ui-se-overlay-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 24px 26px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .ui-se-overlay-eyebrow {
+    margin: 0 0 8px;
+    color: #81ecff;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    font-weight: 800;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .ui-se-overlay-title {
+    margin: 0;
+    color: #ffffff;
+    font-size: clamp(28px, 4vw, 42px);
+    font-style: italic;
+    line-height: 1.02;
+    letter-spacing: -0.04em;
+    font-weight: 900;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .ui-se-overlay-subtitle {
+    margin: 10px 0 0;
+    color: rgba(255, 255, 255, 0.72);
+    max-width: 760px;
+    line-height: 1.72;
+    font-size: 14px;
+  }
+  .ui-se-overlay-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .ui-se-overlay-button {
+    border: 1px solid rgba(155, 168, 255, 0.22);
+    border-radius: 999px;
+    padding: 12px 18px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    font: inherit;
+    cursor: pointer;
+  }
+  .ui-se-overlay-button.is-primary {
+    background: linear-gradient(90deg, rgba(155, 168, 255, 0.95), rgba(73, 99, 255, 0.95));
+    color: #0b0c12;
+    border-color: transparent;
+    font-weight: 800;
+  }
+  .ui-se-overlay-body {
+    overflow: auto;
+    padding: 24px 26px 30px;
+  }
+  .ui-se-overlay-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .ui-se-feature-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(30, 30, 38, 0.95), rgba(14, 14, 18, 0.95));
+    overflow: hidden;
+  }
+  .ui-se-feature-poster {
+    min-height: 200px;
+    padding: 18px;
+    display: flex;
+    align-items: flex-end;
+    background:
+      radial-gradient(circle at top left, rgba(129, 236, 255, 0.22), transparent 48%),
+      radial-gradient(circle at top right, rgba(155, 168, 255, 0.28), transparent 42%),
+      linear-gradient(135deg, rgba(12, 12, 18, 1), rgba(29, 24, 51, 1));
+  }
+  .ui-se-feature-rank {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 900;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(4, 4, 7, 0.48);
+  }
+  .ui-se-feature-content {
+    padding: 18px;
+  }
+  .ui-se-feature-meta {
+    margin: 0 0 8px;
+    color: #81ecff;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .ui-se-feature-title {
+    margin: 0;
+    color: #ffffff;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-style: italic;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    font-weight: 800;
+  }
+  .ui-se-feature-copy {
+    margin: 12px 0 0;
+    color: rgba(255, 255, 255, 0.74);
+    line-height: 1.72;
+    font-size: 14px;
+  }
+  .ui-se-feature-tags,
+  .ui-se-detail-tags {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+  }
+  .ui-se-feature-tags span,
+  .ui-se-detail-tags span {
+    border-radius: 999px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+  }
+  .ui-se-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+    gap: 22px;
+  }
+  .ui-se-detail-panel {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 22px;
+    background: linear-gradient(180deg, rgba(28, 28, 34, 0.96), rgba(12, 12, 16, 0.96));
+    padding: 20px;
+  }
+  .ui-se-detail-panel h3 {
+    margin: 0;
+    font-family: 'Space Grotesk', sans-serif;
+    color: #ffffff;
+    font-size: 20px;
+    font-style: italic;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+  .ui-se-detail-panel ul {
+    margin: 14px 0 0;
+    padding-left: 18px;
+    color: rgba(255, 255, 255, 0.78);
+    line-height: 1.9;
+  }
+  .ui-se-record-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .ui-se-record-item {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 16px;
+  }
+  .ui-se-record-item strong {
+    display: block;
+    color: #ffffff;
+    font-size: 16px;
+    margin-bottom: 6px;
+  }
+  .ui-se-record-item p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.68);
+    line-height: 1.7;
+  }
+  .ui-se-inline-link {
+    color: #9ba8ff;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  @media (max-width: 980px) {
+    .ui-se-overlay-panel {
+      inset: 3vh 3vw;
+    }
+    .ui-se-overlay-grid,
+    .ui-se-detail-layout {
+      grid-template-columns: 1fr;
+    }
+    .ui-se-overlay-head {
+      flex-direction: column;
+    }
+  }
+</style>
 <script>
 (() => {
-  const routes = ${bridgeConfig};
+  const config = ${bridgeConfig};
+  const state = { project: null, features: null };
   const normalize = (value) => String(value || "").trim().toLowerCase();
-  const navigate = (href) => {
-    window.location.href = href;
-  };
-  const bindNode = (node, href) => {
-    if (node.tagName === "A") {
-      node.setAttribute("href", href);
-    } else {
-      node.style.cursor = "pointer";
-      node.addEventListener("click", () => navigate(href));
+  const escapeHtml = (value) => String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  const ensureMount = () => {
+    let mount = document.getElementById("ui-se-overlay-root");
+    if (!mount) {
+      mount = document.createElement("div");
+      mount.id = "ui-se-overlay-root";
+      mount.dataset.open = "false";
+      document.body.appendChild(mount);
     }
+    return mount;
+  };
+  const closeOverlay = () => {
+    const mount = ensureMount();
+    mount.dataset.open = "false";
+    mount.innerHTML = "";
+    document.body.style.overflow = "";
+  };
+  const ensurePayload = async () => {
+    if (state.project && state.features) {
+      return state;
+    }
+    const [project, featuresPayload] = await Promise.all([
+      fetch("/api/project").then((response) => response.json()),
+      fetch("/api/features").then((response) => response.json()),
+    ]);
+    state.project = project;
+    state.features = featuresPayload.features || [];
+    return state;
+  };
+  const renderShell = (title, subtitle, body) => {
+    const mount = ensureMount();
+    mount.dataset.open = "true";
+    document.body.style.overflow = "hidden";
+    mount.innerHTML = \`
+      <div class="ui-se-overlay-backdrop" data-overlay-close></div>
+      <section class="ui-se-overlay-panel" role="dialog" aria-modal="true">
+        <header class="ui-se-overlay-head">
+          <div>
+            <p class="ui-se-overlay-eyebrow">Runtime Content Layer</p>
+            <h2 class="ui-se-overlay-title">\${title}</h2>
+            <p class="ui-se-overlay-subtitle">\${subtitle}</p>
+          </div>
+          <div class="ui-se-overlay-actions">
+            <button class="ui-se-overlay-button" type="button" data-open-runtime>打开可运行站点</button>
+            <button class="ui-se-overlay-button is-primary" type="button" data-overlay-close>关闭</button>
+          </div>
+        </header>
+        <div class="ui-se-overlay-body">\${body}</div>
+      </section>
+    \`;
+    for (const node of mount.querySelectorAll("[data-overlay-close]")) {
+      node.addEventListener("click", closeOverlay);
+    }
+    const runtimeButton = mount.querySelector("[data-open-runtime]");
+    if (runtimeButton) {
+      runtimeButton.addEventListener("click", () => {
+        window.location.href = config.runtimeCatalog;
+      });
+    }
+  };
+  const openCatalog = async () => {
+    const payload = await ensurePayload();
+    const cards = payload.features.map((feature, index) => {
+      const primaryRecord = feature.records[0];
+      const copy = primaryRecord?.title || feature.description;
+      const meta = payload.project.clarifications[index]?.answer || feature.name;
+      return \`
+        <article class="ui-se-feature-card">
+          <div class="ui-se-feature-poster">
+            <div class="ui-se-feature-rank">0\${index + 1}</div>
+          </div>
+          <div class="ui-se-feature-content">
+            <p class="ui-se-feature-meta">\${escapeHtml(meta)}</p>
+            <h3 class="ui-se-feature-title">\${escapeHtml(feature.name)}</h3>
+            <p class="ui-se-feature-copy">\${escapeHtml(copy)}</p>
+            <div class="ui-se-feature-tags">
+              \${(feature.acceptanceCriteria || []).slice(0, 3).map((item) => \`<span>\${escapeHtml(item)}</span>\`).join("")}
+            </div>
+            <div class="ui-se-feature-tags">
+              <span class="ui-se-inline-link" data-feature-open="\${feature.id}">进入详情</span>
+            </div>
+          </div>
+        </article>
+      \`;
+    }).join("");
+    renderShell(
+      "CONTENT INDEX",
+      payload.project.summary,
+      \`<div class="ui-se-overlay-grid">\${cards}</div>\`,
+    );
+    for (const node of document.querySelectorAll("[data-feature-open]")) {
+      node.addEventListener("click", () => {
+        const featureId = node.getAttribute("data-feature-open");
+        if (featureId) {
+          void openDetail(featureId);
+        }
+      });
+    }
+  };
+  const openDetail = async (featureId) => {
+    const payload = await ensurePayload();
+    const feature = payload.features.find((item) => item.id === featureId) || payload.features[0];
+    if (!feature) {
+      return;
+    }
+    const records = feature.records?.length
+      ? feature.records.map((record) => \`
+          <article class="ui-se-record-item">
+            <strong>\${escapeHtml(record.title)}</strong>
+            <p>\${escapeHtml(record.status || "ready")}</p>
+            <div class="ui-se-detail-tags">
+              \${(record.actions || []).map((action) => \`<span>\${escapeHtml(action)}</span>\`).join("")}
+            </div>
+          </article>
+        \`).join("")
+      : \`<article class="ui-se-record-item"><strong>当前暂无记录</strong><p>数据库中还没有额外状态数据，后续可以继续填充。</p></article>\`;
+    renderShell(
+      escapeHtml(feature.name).toUpperCase(),
+      feature.description,
+      \`
+        <div class="ui-se-detail-layout">
+          <section class="ui-se-detail-panel">
+            <h3>Feature Scope</h3>
+            <ul>\${(feature.acceptanceCriteria || []).map((item) => \`<li>\${escapeHtml(item)}</li>\`).join("")}</ul>
+          </section>
+          <section class="ui-se-detail-panel">
+            <h3>Runtime Records</h3>
+            <div class="ui-se-record-list">\${records}</div>
+          </section>
+        </div>
+      \`,
+    );
+  };
+  const bindNode = (node, handler) => {
+    if (!node) {
+      return;
+    }
+    node.style.cursor = "pointer";
+    if (node.tagName === "A") {
+      node.setAttribute("href", "#");
+    }
+    node.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void handler();
+    });
   };
   const catalogKeywords = [
     "browse",
@@ -325,16 +693,35 @@ async function buildApprovedUiLanding(
       continue;
     }
     if (detailKeywords.some((keyword) => text.includes(keyword))) {
-      bindNode(node, routes.detail);
+      bindNode(node, async () => {
+        const payload = await ensurePayload();
+        const fallbackId = payload.features[0]?.id;
+        await openDetail(config.primaryFeatureId || fallbackId);
+      });
       continue;
     }
     if (catalogKeywords.some((keyword) => text.includes(keyword))) {
-      bindNode(node, routes.catalog);
+      bindNode(node, openCatalog);
     }
   }
+  const posterCards = document.querySelectorAll(".group.relative.overflow-hidden.rounded-xl");
+  posterCards.forEach((card, index) => {
+    bindNode(card, async () => {
+      const payload = await ensurePayload();
+      const feature = payload.features[index % payload.features.length];
+      if (feature) {
+        await openDetail(feature.id);
+      } else {
+        await openCatalog();
+      }
+    });
+  });
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeOverlay();
+    }
     if (event.altKey && event.key.toLowerCase() === "r") {
-      navigate(routes.home);
+      window.location.href = config.runtimeHome;
     }
   });
 })();
