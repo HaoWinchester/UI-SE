@@ -1,5 +1,5 @@
-// 这个文件负责生成“给客户看”的最终预览页，并启动一个本地静态服务器。
-// 这样 orchestrator 在进入最终验收时，拿到的就是一个可直接打开的网址，而不只是文件路径。
+// 这个文件负责生成“给客户看”的最终预览入口。
+// 优先直接启动生成出来的网站本身；只有在缺少可运行项目时，才回退到静态验收页。
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -16,6 +16,25 @@ export class StaticCustomerPreviewManager implements CustomerPreviewManager {
 
   async prepare(job: WorkflowJob): Promise<CustomerPreviewArtifact> {
     const generatedAt = new Date().toISOString();
+    if (job.generatedProjectArtifact) {
+      const port = await findAvailablePort();
+      const serverUrl = `http://127.0.0.1:${port}/index.html`;
+      const projectDir = path.join(this.baseDir, job.generatedProjectArtifact.directoryPath);
+      const serverEntryPath = path.join(this.baseDir, job.generatedProjectArtifact.serverEntryPath);
+      const htmlPath = path.posix.join(job.generatedProjectArtifact.publicDirPath, "index.html");
+      this.startGeneratedProjectServer(serverEntryPath, projectDir, port);
+
+      return {
+        directoryPath: job.generatedProjectArtifact.directoryPath,
+        htmlPath,
+        serverUrl,
+        port,
+        generatedAt,
+        approvedUiHtmlPath: job.uiArtifact?.htmlPath,
+        approvedUiImagePath: job.uiArtifact?.imagePath,
+      };
+    }
+
     const relativeDir = path.posix.join("artifacts", "customer-preview", job.id);
     const absoluteDir = path.join(this.baseDir, relativeDir);
     await mkdir(absoluteDir, { recursive: true });
@@ -79,6 +98,19 @@ export class StaticCustomerPreviewManager implements CustomerPreviewManager {
   private startPreviewServer(rootDir: string, port: number): void {
     const scriptPath = path.join(this.baseDir, "scripts", "preview-server.mjs");
     const child = spawn(process.execPath, [scriptPath, "--root", rootDir, "--port", String(port)], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  }
+
+  private startGeneratedProjectServer(serverEntryPath: string, projectDir: string, port: number): void {
+    const child = spawn(process.execPath, [serverEntryPath], {
+      cwd: projectDir,
+      env: {
+        ...process.env,
+        PORT: String(port),
+      },
       detached: true,
       stdio: "ignore",
     });
