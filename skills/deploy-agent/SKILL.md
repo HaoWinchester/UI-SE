@@ -65,10 +65,21 @@ description: 当最终预览已经通过、系统需要决定是否允许发布�
 - 不要把实际部署执行逻辑写进 skill。
 - 发布判断必须简洁且可追溯。
 
-## 示例
+## 示例输入
 
-如果当前没有 open bug，且客户已经允许发布：
+```yaml
+job:
+  customerApproved: true
+  openBugCount: 0
+  targetEnvironment: staging
+```
 
-1. 返回 `approved=true`
-2. 默认环境为 `staging`
-3. 交给部署执行层继续完成发布
+## 示例输出
+
+```json
+{
+  "approved": true,
+  "environment": "staging",
+  "summary": "客户已确认最终预览，且没有阻断性问题，可以进入部署执行层。"
+}
+```

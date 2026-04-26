@@ -71,10 +71,28 @@ description: 当一个功能点、流程或最终交付物已经完成测试执�
 - 不要把“测试执行”和“测试解释”混在一起。
 - 对重复失败要明确标记，避免下一轮修复继续踩同一个坑。
 
-## 示例
+## 示例输入
 
-如果某个功能点第二次测试仍然因为相同 bug 标题失败：
+```yaml
+feature:
+  title: 首页推荐内容读取
+testRun:
+  status: failed
+  bugTitles:
+    - 前端缺少实现完成标记
+  previousFailures:
+    - 前端缺少实现完成标记
+```
 
-1. 识别为重复失败。
-2. 输出 `repeatedFailure=true`。
-3. 让 `fix-agent` 进入更聚焦的修复。
+## 示例输出
+
+```json
+{
+  "shouldFix": true,
+  "repeatedFailure": true,
+  "failingBugIds": [
+    "bug-feature-home-01"
+  ],
+  "summary": "本轮失败与上一轮命中相同 bug 标题，需要进入更聚焦的修复环。"
+}
+```

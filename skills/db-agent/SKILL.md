@@ -85,15 +85,27 @@ description: 当一个功能点需要 Prisma + PostgreSQL 数据层时，必须�
 - migration、seed、repository 必须互相对齐。
 - 文件写入范围必须限制在数据库工作区。
 
-## 示例
+## 示例输入
 
-当前功能点：
-```text
-动漫详情页需要展示番剧信息、追更状态和更新时间
+```yaml
+feature:
+  title: 动漫详情页需要展示番剧信息、追更状态和更新时间
+requirement:
+  title: 动漫网站
+  acceptedScope: 首页、分类、详情
+codeWorkspace: artifacts/code-workspace/<jobId>/database
 ```
 
-期望行为：
+## 示例输出
 
-1. 为番剧详情建最小模型。
-2. 生成 Prisma schema 与 migration。
-3. 补上可执行 seed 和 repository 方法。
+```yaml
+implementationPlan:
+  - 在 Prisma schema 中增加 AnimeRecord 模型
+  - 生成详情页相关 migration 和 seed
+  - 暴露 repository.getAnimeDetail 方法
+changedFiles:
+  - database/prisma/schema.prisma
+  - database/prisma/migrations/anime_detail_init/migration.sql
+  - database/prisma/seeds/anime-detail.sql
+  - database/src/features/anime-detail/repository.ts
+```

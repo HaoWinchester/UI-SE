@@ -89,15 +89,27 @@ description: 当测试失败、出现 bug，或者 monitor-agent 发现前端、
 - 不要只给口头建议而不输出修复结果。
 - 文件写入范围必须限制在代码工作区。
 
-## 示例
+## 示例输入
 
-输入：
+```yaml
+feature:
+  title: 首页推荐内容读取
+bugReports:
+  - title: 前端缺少实现完成标记
+alignmentFindings:
+  - layer: database
+    rule: repository_delegate_mismatch
+    file: database/src/features/anime-home/repository.ts
+```
 
-- bug：前端缺少实现完成标记
-- finding：数据库 repository 没有使用正确 delegate
+## 示例输出
 
-期望行为：
-
-1. 同时修前端标记和数据库 delegate。
-2. 输出实际代码改动。
-3. 把功能点送回复测与重新对齐检查。
+```yaml
+repairPlan:
+  - 为前端主组件补上完成标记
+  - 修正数据库 repository 使用的 Prisma delegate
+changedFiles:
+  - frontend/src/features/anime-home/FeatureView.tsx
+  - database/src/features/anime-home/repository.ts
+summary: 已按前端和数据库两层定向修复，下一步进入复测与重新对齐检查。
+```

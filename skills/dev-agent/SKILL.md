@@ -53,3 +53,22 @@ description: 这是一个兼容旧流程的开发 skill。仅当工作流仍使�
 
 - 这是兼容角色，不要和当前主流程角色混淆。
 - 只用于旧版单开发 agent 迁移或回放场景。
+
+## 示例输入
+
+```yaml
+feature:
+  title: 首页推荐区
+uiArtifactPath: artifacts/ui/<jobId>/v1/stitch-approved.html
+codeContext: legacy single-agent workspace
+```
+
+## 示例输出
+
+```yaml
+implementationPlan:
+  - 先生成首页推荐区的单 agent 实现计划
+  - 标记后续应拆分为 frontend / backend / db 三段
+handoff:
+  - 优先迁移到 frontend-agent、backend-agent、db-agent
+```

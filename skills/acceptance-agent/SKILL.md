@@ -69,15 +69,22 @@ description: 当实现已经通过主要测试，系统需要决定“现在能�
 - 不要忽略 open bug 或未完成功能点。
 - 优先提供一个清晰的预览入口，不要给客户多个混乱入口。
 
-## 示例
+## 示例输入
 
-如果当前：
+```yaml
+job:
+  allFeaturesCompleted: true
+  openBugCount: 0
+  previewCandidates:
+    - artifacts/customer-preview/<jobId>/index.html
+```
 
-- 所有 feature 都已完成
-- 没有 open bug
-- `customer-preview` 地址可用
+## 示例输出
 
-则应返回：
-
-- `readyForCustomerReview=true`
-- `previewPath=<customer preview url>`
+```json
+{
+  "readyForCustomerReview": true,
+  "previewPath": "artifacts/customer-preview/<jobId>/index.html",
+  "summary": "当前没有 open bug，功能点已完成，可以进入客户预览。"
+}
+```

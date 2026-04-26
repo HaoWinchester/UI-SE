@@ -87,15 +87,26 @@ description: 当某个已批准的功能点需要根据 UI 设计图落成前端
 - 文件写入范围必须限制在前端工作区。
 - 优先做小而可测的改动，不做大范围重构。
 
-## 示例
+## 示例输入
 
-当前功能点：
-```text
-首页展示番剧榜单、分类入口和主推荐区域
+```yaml
+feature:
+  title: 首页展示番剧榜单、分类入口和主推荐区域
+uiArtifactPath: artifacts/ui/<jobId>/v2/stitch-approved.html
+codeWorkspace: artifacts/code-workspace/<jobId>/frontend
 ```
 
-期望行为：
+## 示例输出
 
-1. 先根据批准 UI 生成首页对应的前端组件。
-2. 带上 feature marker，方便 monitor-agent 校验。
-3. 输出主组件和样式文件，而不是生成整个站点。
+```yaml
+implementationPlan:
+  - 生成首页 FeatureView 组件
+  - 补上榜单、分类入口和推荐卡片区域
+  - 写入对齐标记和基础状态占位
+changedFiles:
+  - frontend/src/features/anime-home/FeatureView.tsx
+  - frontend/src/features/anime-home/feature.css
+fileEdits:
+  - path: frontend/src/features/anime-home/FeatureView.tsx
+    note: 包含榜单区、分类入口、推荐区和 feature marker
+```

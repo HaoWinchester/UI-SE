@@ -84,15 +84,28 @@ description: 当一个功能点需要根据批准后的需求生成后端接口�
 - 文件写入范围必须限制在后端工作区。
 - 优先显式契约，不要依赖隐式行为。
 
-## 示例
+## 示例输入
 
-当前功能点：
-```text
-支持首页推荐内容的读取与列表展示
+```yaml
+feature:
+  title: 支持首页推荐内容的读取与列表展示
+requirement:
+  title: 动漫网站
+  acceptedScope: 首页、分类、详情
+codeWorkspace: artifacts/code-workspace/<jobId>/backend
 ```
 
-期望行为：
+## 示例输出
 
-1. 生成最小路由与 schema。
-2. 明确 list / create 等 repository 调用关系。
-3. 让测试阶段能直接验证接口是否连上数据层。
+```yaml
+implementationPlan:
+  - 增加推荐列表查询接口
+  - 生成请求校验与响应结构
+  - 显式连接 repository.listFeaturedAnime
+changedFiles:
+  - backend/src/features/anime-home/route.ts
+  - backend/src/features/anime-home/schema.ts
+fileEdits:
+  - path: backend/src/features/anime-home/route.ts
+    note: 暴露 GET /api/anime/home 路由
+```

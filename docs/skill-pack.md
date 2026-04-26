@@ -47,9 +47,15 @@
 3. 复制或重写 `src/workflow/orchestrator.ts`
 4. 再按目标项目的目录结构调整 `readScopes` / `writeScopes`
 
-## 下一步
+## V3 补强
 
-如果要把这套 skill 进一步产品化，最值得补的有两类：
+当前仓库已经补上两类更适合持续迭代的材料：
 
-1. 给每个 skill 增加示例输入输出
-2. 给整套 skill 加一份 eval 测试集，验证不同需求下是否会稳定触发正确角色
+1. 每个核心 skill 都补了更明确的“示例输入 / 示例输出”
+2. 在 [evals/evals.json](../evals/evals.json) 里放了一份初版评测集，用来验证不同 prompt 下的主要触发角色和预期行为
+
+后面如果要继续升级，优先顺序建议是：
+
+1. 为 `evals` 增加断言
+2. 跑真实评测并回看触发偏差
+3. 再针对命中率低的 skill 重写 description 或工作流说明

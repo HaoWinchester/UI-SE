@@ -1,0 +1,59 @@
+{
+  "skill_name": "ui-se-agent-skill-pack",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我需要一个动漫网站的设计 UI",
+      "expected_output": "应先触发 spec-agent 做需求澄清，而不是直接进入 Stitch。需要追问终端形态、首版范围和核心用户主路径，并生成结构化 spec。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "上一版首页太拥挤了，保留动漫网站主路径，但请把榜单和分类做得更突出一些。",
+      "expected_output": "应主要触发 ui-agent，根据已批准 spec 和反馈重写 Stitch prompt，而不是改动需求范围或直接进入前后端开发。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "请根据已经确认的 UI，把首页的榜单、分类入口和推荐区域生成为前端页面代码。",
+      "expected_output": "应触发 frontend-agent，输出前端 fileEdits、changedFiles 和 implementationPlan，并把改动限制在前端工作区。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "首页推荐内容已经定下来了，现在需要一个后端接口把推荐列表返回给前端。",
+      "expected_output": "应触发 backend-agent，输出接口、校验和服务层相关代码改动，并显式连接 repository。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "动漫详情页要接 PostgreSQL，使用 Prisma 建表、迁移和 seed。",
+      "expected_output": "应触发 db-agent，生成 schema、migration、seed 和 repository 相关改动，而不是只停留在文字说明。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "这个功能点测试第二次还是因为前端缺少实现完成标记失败，帮我判断下一步怎么走。",
+      "expected_output": "应主要触发 test-agent，识别为 repeated failure，返回 shouldFix=true，并为 fix-agent 组织修复输入。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "监控发现后端 route 没有调用预期 repository，而且前端缺少对齐标记，请定向修复。",
+      "expected_output": "应先由 monitor-agent 输出结构化 finding，再由 fix-agent 生成最小修复改动，而不是做无关重构。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "现在所有功能都做完了，也没有 open bug，帮我判断能不能给客户看，并给出预览入口。",
+      "expected_output": "应触发 acceptance-agent，返回 readyForCustomerReview=true，并提供单一清晰的 previewPath。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "客户已经确认页面，当前没有阻断问题，现在是否允许发布到 staging？",
+      "expected_output": "应触发 deploy-agent，返回 approved=true 和 environment=staging，并把决定交给部署执行层。",
+      "files": []
+    }
+  ]
+}

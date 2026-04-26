@@ -83,15 +83,29 @@ description: 当系统需要确认当前实现是否仍与批准后的需求和 
 - 不要忽略数据库执行失败或未批准 UI 这类阻断条件。
 - 对 feature 级和 job 级检查要清楚区分范围。
 
-## 示例
+## 示例输入
 
-feature 级检查时，如果发现：
+```yaml
+scope: feature
+feature:
+  title: 首页推荐内容读取
+checkedFiles:
+  - frontend/src/features/anime-home/FeatureView.tsx
+  - backend/src/features/anime-home/route.ts
+```
 
-- 前端缺少 `data-alignment-verified="true"`
-- 后端 route 没有调用预期 repository
+## 示例输出
 
-期望行为：
-
-1. 输出两个结构化 finding。
-2. 标记为 blocking。
-3. 把结果交给 `fix-agent` 做定向修复。
+```yaml
+aligned: false
+structuredFindings:
+  - layer: frontend
+    rule: missing_alignment_marker
+    blocking: true
+    file: frontend/src/features/anime-home/FeatureView.tsx
+  - layer: backend
+    rule: route_repository_not_connected
+    blocking: true
+    file: backend/src/features/anime-home/route.ts
+scope: feature
+```
