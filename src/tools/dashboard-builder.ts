@@ -193,6 +193,7 @@ function buildDashboardHtml(
   const deploymentSummary = job.deployment
     ? `${job.deployment.status} / ${job.deployment.environment}`
     : "尚未部署";
+  const generatedProjectArtifact = job.generatedProjectArtifact;
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -441,6 +442,22 @@ function buildDashboardHtml(
               <span class="muted">${escapeHtml(currentTeamLabel)}</span>
             </div>
             <ul class="timeline">${teamHistoryItems || '<li class="timeline-item"><div class="timeline-body">当前还没有 team 交接记录。</div></li>'}</ul>
+          </section>
+
+          <section class="card">
+            <div class="section-head">
+              <h2>可运行项目</h2>
+              <span class="muted">${generatedProjectArtifact ? "已生成" : "未生成"}</span>
+            </div>
+            ${
+              generatedProjectArtifact
+                ? `
+                  <p>${escapeHtml(generatedProjectArtifact.summary)}</p>
+                  <p class="muted" style="margin-top: 10px;">目录：<a href="${toFileHref(path.join(baseDir, generatedProjectArtifact.directoryPath))}">打开项目目录</a></p>
+                  <p class="muted" style="margin-top: 10px;">启动方式：${escapeHtml(generatedProjectArtifact.startCommand)}</p>
+                `
+                : '<p class="muted">当前还没有生成可运行项目骨架。</p>'
+            }
           </section>
 
           <section class="card">

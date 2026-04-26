@@ -219,6 +219,19 @@ export interface DashboardArtifact {
   generatedAt: string;
 }
 
+// 生成后的可运行项目骨架，会放在每个 job 自己的代码工作区中。
+export interface GeneratedProjectArtifact {
+  directoryPath: string;
+  serverEntryPath: string;
+  manifestPath: string;
+  runtimeConfigPath: string;
+  packageJsonPath: string;
+  publicDirPath: string;
+  generatedAt: string;
+  startCommand: string;
+  summary: string;
+}
+
 // 客户预览页是最终给客户查看的本地可访问页面。
 export interface CustomerPreviewArtifact {
   directoryPath: string;
@@ -297,6 +310,7 @@ export interface WorkflowJob {
   teamHistory: TeamHandoffRecord[];
   codeWorkspace: CodeWorkspace;
   logFilePath: string;
+  generatedProjectArtifact?: GeneratedProjectArtifact;
   dashboardArtifact?: DashboardArtifact;
   customerPreviewArtifact?: CustomerPreviewArtifact;
   specArtifact?: SpecArtifact;

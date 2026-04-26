@@ -100,6 +100,8 @@ async function main(): Promise<void> {
     console.log(`Alignment reports: ${result.alignmentReports.length}`);
     console.log(`Database runs: ${result.databaseRuns.length}`);
     console.log(`Code workspace: ${path.join(workspaceRoot, result.codeWorkspace.rootDir)}`);
+    console.log(`Generated project: ${result.generatedProjectArtifact ? path.join(workspaceRoot, result.generatedProjectArtifact.directoryPath) : "none"}`);
+    console.log(`Project start: ${result.generatedProjectArtifact?.startCommand ?? "none"}`);
     console.log(
       `Generated code files: ${result.requirement.features.reduce((total, feature) => total + feature.generatedFiles.length, 0)}`,
     );

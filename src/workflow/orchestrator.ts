@@ -31,6 +31,10 @@ import { StaticCustomerPreviewManager, type CustomerPreviewManager } from "../to
 import { StaticHtmlDashboardBuilder, type DashboardBuilder } from "../tools/dashboard-builder.js";
 import { PostgresDatabaseRunner, type DatabaseRunner } from "../tools/database-runner.js";
 import { MockDeployer, type Deployer } from "../tools/deployer.js";
+import {
+  WorkspaceGeneratedProjectBuilder,
+  type GeneratedProjectBuilder,
+} from "../tools/generated-project.js";
 import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../tools/repo-writer.js";
 import { persistSpeckitSpecWorkspace } from "../tools/speckit-workspace.js";
 import { createStitchClientFromEnv, type StitchClient } from "../tools/stitch-client.js";
@@ -119,6 +123,7 @@ interface OrchestratorDependencies {
   databaseRunner: DatabaseRunner;
   dashboardBuilder: DashboardBuilder;
   customerPreviewManager: CustomerPreviewManager;
+  generatedProjectBuilder: GeneratedProjectBuilder;
   baseDir: string;
   onProgress?: (message: string) => void;
   requestSpecClarification?: (
@@ -337,6 +342,26 @@ export class DeliveryOrchestrator {
         return result;
       }
     }
+
+    job = await this.deps.store.get(jobId);
+    const generatedProjectArtifact = await this.deps.generatedProjectBuilder.prepare(job);
+    await this.deps.store.update(jobId, (current) => ({
+      ...current,
+      generatedProjectArtifact,
+    }));
+    await this.persistWorkflowLog(jobId, {
+      createdAt: generatedProjectArtifact.generatedAt,
+      level: "info",
+      stage: "running_flow_tests",
+      message: generatedProjectArtifact.summary,
+      teamName: "delivery-team",
+      teamLabel: agentTeams["delivery-team"].label,
+      details: {
+        directoryPath: generatedProjectArtifact.directoryPath,
+        startCommand: generatedProjectArtifact.startCommand,
+      },
+    });
+    await this.refreshDashboard(jobId);
 
     job = await this.deps.store.get(jobId);
     await this.enterTeam(
@@ -1730,6 +1755,7 @@ export function createDefaultOrchestrator(
     databaseRunner: new PostgresDatabaseRunner(baseDir),
     dashboardBuilder: new StaticHtmlDashboardBuilder(baseDir),
     customerPreviewManager: new StaticCustomerPreviewManager(baseDir),
+    generatedProjectBuilder: new WorkspaceGeneratedProjectBuilder(baseDir),
     baseDir,
     onProgress: hooks.onProgress,
     requestSpecClarification: hooks.requestSpecClarification,

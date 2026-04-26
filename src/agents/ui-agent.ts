@@ -22,7 +22,6 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
 
   async run({
     requirement,
-    specArtifact,
     designFeedback,
   }: UiAgentInput): Promise<AgentResult<UiAgentOutput>> {
     // 把澄清后的 spec、feature 和验收标准整理成一段更适合 UI 生成工具理解的描述。
@@ -45,28 +44,46 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
       .map((scenario, index) => `${index + 1}. ${scenario}`)
       .join("\n");
 
-    const prompt = [
-      `Project title: ${requirement.title}`,
-      `Summary: ${requirement.summary}`,
+    const assumptionsList = requirement.assumptions
+      .map((item, index) => `${index + 1}. ${item}`)
+      .join("\n");
+
+    const clarifiedSpec = [
+      `产品名称：${requirement.title}`,
+      `项目摘要：${requirement.summary}`,
       "",
-      "Use this clarified product spec as the grounding reference:",
-      specArtifact?.markdown ?? "(No persisted spec markdown available.)",
+      "已澄清的关键决策：",
+      clarificationList || "1. 当前没有额外澄清项。",
       "",
-      designFeedback
-        ? `Revise the previous UI concept using this customer feedback: ${designFeedback}`
-        : "This is the first UI concept for the clarified requirement.",
-      "",
-      "Generate an initial UI concept that supports the following features:",
-      featureList,
-      "",
-      "Ground the layout in these user scenarios:",
+      "核心用户场景：",
       scenarioList,
       "",
-      "Use these clarified decisions:",
-      clarificationList,
+      "首版功能切片：",
+      featureList,
       "",
-      "Respect these acceptance criteria:",
+      "必须满足的验收标准：",
       acceptanceList,
+      "",
+      "当前默认假设：",
+      assumptionsList,
+    ].join("\n");
+
+    const prompt = [
+      "You are generating a product UI concept from a clarified, approved requirement.",
+      "Only use the clarified specification below as the source of truth. Do not fall back to the original one-line request.",
+      "",
+      "Clarified specification:",
+      clarifiedSpec,
+      "",
+      designFeedback
+        ? `Revision feedback from the latest rejected design: ${designFeedback}`
+        : "This is the first UI concept for the clarified requirement.",
+      "",
+      "Design constraints:",
+      "- The UI must reflect the clarified feature boundaries exactly.",
+      "- The main journey should be obvious from the landing screen and primary navigation.",
+      "- Provide a realistic, buildable product layout instead of a vague mood board.",
+      "- Keep the output aligned with the approved first-release scope.",
     ].join("\n");
 
     return {

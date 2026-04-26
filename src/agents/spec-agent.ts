@@ -265,14 +265,17 @@ function inferTitle(rawRequirement: string): string {
     return "Untitled workflow";
   }
 
-  return firstLine.replace(/^[*-]\s*/, "").slice(0, 80);
+  return normalizeRequirementTitle(firstLine.replace(/^[*-]\s*/, "")).slice(0, 80);
 }
 
 // 生成简短摘要，优先突出这次自动澄清后的目标和功能范围。
 function summarizeRequirement(rawRequirement: string, featureNames: string[]): string {
-  const normalized = rawRequirement.replace(/\s+/g, " ").trim();
-  const featurePreview = featureNames.slice(0, 3).join("; ");
-  return `${normalized} Core slices: ${featurePreview}`.slice(0, 220);
+  const normalizedTitle = normalizeRequirementTitle(rawRequirement);
+  const featurePreview = featureNames.slice(0, 3).join("；");
+  return `围绕「${normalizedTitle}」生成首版可交付产品方案，当前已收敛的核心功能包括：${featurePreview}。`.slice(
+    0,
+    220,
+  );
 }
 
 // 优先从项目符号中提取功能点；如果用户只给一句话，就按当前 scope 生成可执行切片。
@@ -290,6 +293,31 @@ function extractFeatureNames(
 
   if (bulletLines.length > 0) {
     return bulletLines;
+  }
+
+  const containsChinese = /[\u4e00-\u9fff]/.test(rawRequirement);
+  if (containsChinese) {
+    if (scopeAnswer?.includes("首页视觉展示")) {
+      return [
+        "首页视觉与品牌展示",
+        "核心卖点与内容分区",
+        "主要入口与引导操作",
+      ];
+    }
+
+    if (scopeAnswer?.includes("完整多页面产品")) {
+      return [
+        "首页与主导航体验",
+        "内容浏览与发现流程",
+        "详情页与关键状态反馈",
+      ];
+    }
+
+    return [
+      "首页与主入口体验",
+      "内容浏览与发现流程",
+      "详情页与状态反馈",
+    ];
   }
 
   if (scopeAnswer?.includes("首页视觉展示")) {
@@ -370,7 +398,16 @@ function buildUserScenarios(
   featureNames: string[],
   primaryJourneyAnswer?: string,
 ): string[] {
+  const containsChinese = /[\u4e00-\u9fff]/.test(subjectLabel);
   const primaryJourney = primaryJourneyAnswer ?? "用户进入产品后完成首个核心任务";
+
+  if (containsChinese) {
+    return [
+      `用户进入「${subjectLabel}」后，可以快速理解首页信息结构和主要入口。`,
+      `首版最重要的主路径是：${primaryJourney}。`,
+      `用户可以围绕这几个核心切片完成主流程：${featureNames.slice(0, 2).join("、")}。`,
+    ];
+  }
 
   return [
     `A primary user opens ${subjectLabel} and quickly understands the main experience.`,
@@ -380,14 +417,27 @@ function buildUserScenarios(
 }
 
 function deriveSubjectLabel(title: string): string {
-  return title
+  const normalized = title
     .replace(/^(build|create|design|generate|make|implement)\s+/i, "")
     .replace(/^(a|an|the)\s+/i, "")
     .replace(/\s+for\s+/i, " for ")
     .trim();
+
+  return normalized || "this product";
 }
 
 function buildAcceptanceCriteria(featureNames: string[], scopeAnswer?: string): string[] {
+  const containsChinese = featureNames.some((item) => /[\u4e00-\u9fff]/.test(item));
+  if (containsChinese) {
+    return [
+      `首版 UI 需要清晰覆盖这些功能切片：${featureNames.join("、")}。`,
+      scopeAnswer
+        ? `必须严格遵守已确认的首版范围：${scopeAnswer}。`
+        : "生成结果需要让主路径和下一步操作足够清晰。",
+      "输出结果必须足够具体，能直接进入前后端开发与测试阶段。",
+    ];
+  }
+
   return [
     `The first UI concept clearly covers these feature slices: ${featureNames.join("; ")}.`,
     scopeAnswer
@@ -398,6 +448,17 @@ function buildAcceptanceCriteria(featureNames: string[], scopeAnswer?: string): 
 }
 
 function buildSuccessCriteria(featureNames: string[], primaryJourneyAnswer?: string): string[] {
+  const containsChinese = featureNames.some((item) => /[\u4e00-\u9fff]/.test(item));
+  if (containsChinese) {
+    return [
+      `干系人能直接从首版设计中识别这 ${featureNames.length} 个功能切片。`,
+      primaryJourneyAnswer
+        ? `首版设计无需额外解释，就能体现这条主路径：${primaryJourneyAnswer}。`
+        : "首版设计无需额外解释，就能体现主路径和关键操作。",
+      "澄清后的 spec 与生成 UI 可以直接交给开发，不需要重新改写需求。",
+    ];
+  }
+
   return [
     `Stakeholders can identify all ${featureNames.length} feature slices directly from the first UI draft.`,
     primaryJourneyAnswer
@@ -465,9 +526,6 @@ function createSpecMarkdown(
   return [
     `# ${requirement.title}`,
     "",
-    "## Input",
-    requirement.rawInput,
-    "",
     "## Summary",
     requirement.summary,
     "",
@@ -487,10 +545,23 @@ function createSpecMarkdown(
     "## Assumptions",
     ...requirement.assumptions.map((assumption) => `- ${assumption}`),
     "",
+    "## Original Request (Context Only)",
+    requirement.rawInput,
+    "",
     "## Feature Slices",
     featureSection,
     "",
   ].join("\n");
+}
+
+function normalizeRequirementTitle(rawTitle: string): string {
+  return rawTitle
+    .replace(/^(我需要|我想要|我想做|帮我做|请帮我做|请做|做一个|生成一个|创建一个|需要一个|需要一套)\s*/u, "")
+    .replace(/^(一个|一套|一个用于|一套用于)\s*/u, "")
+    .replace(/(的)?(设计)?UI(界面)?$/iu, "")
+    .replace(/(的网站|的系统|的平台|的项目)(设计)?$/u, (match) => match.replace(/(的)?(设计)?$/u, ""))
+    .replace(/\s+/g, " ")
+    .trim() || "产品项目";
 }
 
 function mentionsPlatform(rawRequirement: string): boolean {
