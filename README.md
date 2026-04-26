@@ -17,6 +17,7 @@
 
 - `docs/architecture.md`：系统架构和演进路线
 - `docs/agent-runtime.md`：agent 的模型画像、目录权限、工具权限
+- `docs/agent-teams.md`：agent teams 的分组方式、串并行规则和编排图
 - `docs/roadmap.md`：按版本推进的开发计划
 - `src/workflow`：工作流编排与状态流转
 - `src/agents`：各个 agent 的角色定义与默认实现
@@ -24,6 +25,7 @@
 - `src/storage`：任务存储抽象，目前是内存实现
 - `skills`：每个 agent 的本地 skill，以及复制进仓库的 `speckit-*` skill
 - `docs/skill-pack.md`：这一套系统如何拆成可复用 skill 包
+- `src/config/agent-teams.ts`：team 级别的配置稿，定义哪些 agent 归属同一支 team
 - `.specify`：Speckit 期望的模板、memory、bash 脚本骨架
 - `specs`：Speckit 风格的规格目录
 - `artifacts`：生成的 spec、UI、测试结果、部署清单等产物

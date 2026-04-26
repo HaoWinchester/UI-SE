@@ -12,7 +12,8 @@ Each agent declares:
 - `writeScopes`: folders the agent is allowed to modify
 - `tools`: deterministic tools the agent may request through the orchestrator
 
-The source of truth lives in `src/agents/registry.ts`.
+The source of truth for single-agent runtime constraints lives in `src/agents/registry.ts`.
+The team-level grouping draft lives in `src/config/agent-teams.ts`.
 
 ## Current agent map
 
@@ -50,3 +51,19 @@ The source of truth lives in `src/agents/registry.ts`.
 ## Enforcement
 
 The orchestrator validates every agent-reported write path against the declared `writeScopes`. This is not a full sandbox yet, but it keeps the contract explicit and makes it much easier to upgrade to stricter execution later.
+
+## Team orchestration draft
+
+The current repository also includes a team-level draft:
+
+- requirement-design team
+- delivery team
+- quality team
+- release team
+
+This layer does not replace the per-agent runtime contract. It sits above it and answers:
+
+- which agents belong together
+- which members can run in parallel
+- which members must stay serial
+- what artifacts a team shares before handing off to the next team
