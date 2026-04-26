@@ -82,6 +82,10 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
       "Design constraints:",
       "- The UI must reflect the clarified feature boundaries exactly.",
       "- The main journey should be obvious from the landing screen and primary navigation.",
+      "- Generate a linked multi-screen product flow instead of a single isolated hero mockup.",
+      "- At minimum, include separate screens for the landing experience, the main browse/explore flow, and the primary detail/status flow when the requirement implies them.",
+      "- If the clarified spec contains multiple feature slices, map them to multiple connected screens rather than collapsing everything into one page.",
+      "- Name and structure the screens so they can be connected into a buildable website flow after download.",
       "- Provide a realistic, buildable product layout instead of a vague mood board.",
       "- Keep the output aligned with the approved first-release scope.",
     ].join("\n");
@@ -101,6 +105,7 @@ export class UiAgent implements Agent<UiAgentInput, UiAgentOutput> {
           "Submit only after the requirement has been clarified into a concrete spec.",
           "Preserve the approved user flow and feature boundaries.",
           "Carry the clarification decisions into the generated layout, not just the raw one-line request.",
+          "Prefer multiple connected screens when the spec contains multiple major user-flow steps.",
           "Save the generated artifact into the UI artifacts directory.",
         ],
       },
