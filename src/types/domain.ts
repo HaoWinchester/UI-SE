@@ -99,10 +99,19 @@ export interface SpecArtifact {
   markdownPath: string;
   markdown: string;
   clarifiedAt: string;
+  checklistPassed: boolean;
+  checklistNotes: string[];
+  pendingClarificationCount: number;
   speckitFeatureDir?: string;
   speckitSpecPath?: string;
   speckitChecklistPath?: string;
   speckitBranchName?: string;
+  speckitPlanPath?: string;
+  speckitResearchPath?: string;
+  speckitDataModelPath?: string;
+  speckitContractsDirPath?: string;
+  speckitQuickstartPath?: string;
+  speckitTasksPath?: string;
 }
 
 // Stitch 生成出来的 UI 产物信息。
