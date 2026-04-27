@@ -37,10 +37,10 @@ import {
 } from "../tools/generated-project.js";
 import { FileSystemRepoWriter, createCodeWorkspace, type RepoWriter } from "../tools/repo-writer.js";
 import {
-  getSpeckitFeatureTaskIds,
-  getSpeckitFinalTaskIds,
+  collectSpeckitChecklistStatus,
   getSpeckitFoundationTaskIds,
   markSpeckitTasksComplete,
+  parseSpeckitTaskPlan,
   persistSpeckitSpecWorkspace,
   prepareSpeckitImplementationWorkspace,
 } from "../tools/speckit-workspace.js";
@@ -356,6 +356,10 @@ export class DeliveryOrchestrator {
       );
     }
     await this.prepareSpeckitImplementationPhase(jobId, approvedUiArtifact);
+    const speckitExecutionPlan = await this.ensureSpeckitImplementationReady(jobId);
+    if ("blockedJob" in speckitExecutionPlan) {
+      return speckitExecutionPlan.blockedJob;
+    }
     this.notifyProgress(`已确认第 ${approvedUiArtifact.versionNumber} 版 UI，开始进入功能开发阶段。`);
 
     await this.enterTeam(
@@ -364,8 +368,16 @@ export class DeliveryOrchestrator {
       "UI approval completed. Handoff to delivery team for feature implementation.",
     );
     let job = await this.deps.store.get(jobId);
-    for (const feature of job.requirement.features) {
-      const result = await this.developFeature(jobId, feature.id);
+    for (const storyPlan of speckitExecutionPlan.plan.stories) {
+      const feature = job.requirement.features[storyPlan.storyIndex - 1];
+      if (!feature) {
+        return this.blockJob(
+          jobId,
+          `Speckit tasks reference ${storyPlan.storyLabel}, but no matching feature slice exists.`,
+        );
+      }
+
+      const result = await this.developFeature(jobId, feature.id, storyPlan);
       if (result.stage === "blocked") {
         return result;
       }
@@ -664,7 +676,11 @@ export class DeliveryOrchestrator {
           }
         : current.specArtifact,
     }));
-    await markSpeckitTasksComplete(planningWorkspace.tasksPath, getSpeckitFoundationTaskIds());
+    await this.markSpeckitTaskIds(
+      jobId,
+      getSpeckitFoundationTaskIds(),
+      "Completed Speckit setup and foundational planning tasks.",
+    );
     await this.persistWorkflowLog(jobId, {
       createdAt: new Date().toISOString(),
       level: "info",
@@ -680,24 +696,100 @@ export class DeliveryOrchestrator {
     await this.refreshDashboard(jobId);
   }
 
-  private async markSpeckitTasksForFeature(
+  private async ensureSpeckitImplementationReady(
     jobId: string,
-    featureId: string,
-    step: "frontend" | "backend" | "database" | "validation",
+  ): Promise<
+    | {
+        plan: Awaited<ReturnType<typeof parseSpeckitTaskPlan>>;
+      }
+    | {
+        blockedJob: WorkflowJob;
+      }
+  > {
+    const job = await this.deps.store.get(jobId);
+    const specArtifact = job.specArtifact;
+    if (!specArtifact?.speckitFeatureDir || !specArtifact.speckitTasksPath) {
+      return {
+        blockedJob: await this.blockJob(
+          jobId,
+          "Speckit implementation artifacts are incomplete; plan/tasks were not generated.",
+        ),
+      };
+    }
+
+    const checklistStatuses = await collectSpeckitChecklistStatus(specArtifact.speckitFeatureDir);
+    const incompleteChecklists = checklistStatuses.filter((checklist) => !checklist.passed);
+    if (incompleteChecklists.length > 0) {
+      return {
+        blockedJob: await this.blockJob(
+          jobId,
+          `Speckit checklist gate failed: ${incompleteChecklists
+            .map((checklist) => `${checklist.name} (${checklist.incomplete} incomplete)`)
+            .join(", ")}`,
+        ),
+      };
+    }
+
+    const plan = await parseSpeckitTaskPlan(specArtifact.speckitTasksPath);
+    if (plan.stories.length === 0) {
+      return {
+        blockedJob: await this.blockJob(
+          jobId,
+          "Speckit tasks.md does not contain any executable user-story phases.",
+        ),
+      };
+    }
+
+    await this.persistWorkflowLog(jobId, {
+      createdAt: new Date().toISOString(),
+      level: "info",
+      stage: "spec_confirmed",
+      message: "Validated Speckit checklist and task readiness before implementation.",
+      teamName: "requirement-design-team",
+      teamLabel: agentTeams["requirement-design-team"].label,
+      details: {
+        checklistStatuses: checklistStatuses.map((checklist) => ({
+          name: checklist.name,
+          completed: checklist.completed,
+          total: checklist.total,
+        })),
+        storyCount: plan.stories.length,
+        completedTasks: plan.completedTasks,
+        totalTasks: plan.totalTasks,
+      },
+    });
+
+    return { plan };
+  }
+
+  private async markSpeckitTaskIds(
+    jobId: string,
+    taskIds: string[],
+    message: string,
   ): Promise<void> {
     const job = await this.deps.store.get(jobId);
     const tasksPath = job.specArtifact?.speckitTasksPath;
-    if (!tasksPath) {
+    const uniqueTaskIds = [...new Set(taskIds.filter(Boolean))];
+    if (!tasksPath || uniqueTaskIds.length === 0) {
       return;
     }
 
-    const featureIndex = job.requirement.features.findIndex((feature) => feature.id === featureId);
-    if (featureIndex === -1) {
-      return;
-    }
-
-    const taskIds = getSpeckitFeatureTaskIds(featureIndex);
-    await markSpeckitTasksComplete(tasksPath, [taskIds[step]]);
+    await markSpeckitTasksComplete(tasksPath, uniqueTaskIds);
+    const taskPlan = await parseSpeckitTaskPlan(tasksPath);
+    await this.persistWorkflowLog(jobId, {
+      createdAt: new Date().toISOString(),
+      level: "info",
+      stage: job.stage,
+      message,
+      teamName: job.currentTeam,
+      teamLabel: job.currentTeam ? agentTeams[job.currentTeam].label : undefined,
+      details: {
+        completedTaskIds: uniqueTaskIds,
+        completedTasks: taskPlan.completedTasks,
+        totalTasks: taskPlan.totalTasks,
+        remainingTasks: Math.max(taskPlan.totalTasks - taskPlan.completedTasks, 0),
+      },
+    });
   }
 
   private async markSpeckitFinalTask(
@@ -710,11 +802,22 @@ export class DeliveryOrchestrator {
       return;
     }
 
-    const taskIds = getSpeckitFinalTaskIds(job.requirement.features.length);
-    await markSpeckitTasksComplete(tasksPath, [taskIds[step]]);
+    const taskPlan = await parseSpeckitTaskPlan(tasksPath);
+    const taskId = taskPlan.finalTaskIds[step];
+    await this.markSpeckitTaskIds(
+      jobId,
+      taskId ? [taskId] : [],
+      step === "flowValidation"
+        ? "Completed Speckit flow validation task."
+        : "Completed Speckit acceptance and release-readiness task.",
+    );
   }
 
-  private async developFeature(jobId: string, featureId: string): Promise<WorkflowJob> {
+  private async developFeature(
+    jobId: string,
+    featureId: string,
+    storyPlan: Awaited<ReturnType<typeof parseSpeckitTaskPlan>>["stories"][number],
+  ): Promise<WorkflowJob> {
     // 这里封装了单个功能点的完整生命周期。
     let job = await this.deps.store.get(jobId);
     const feature = this.requireFeature(job, featureId);
@@ -750,7 +853,11 @@ export class DeliveryOrchestrator {
       backendStatus: "in_progress",
       databaseStatus: "pending",
     }));
-    await this.markSpeckitTasksForFeature(jobId, featureId, "frontend");
+    await this.markSpeckitTaskIds(
+      jobId,
+      storyPlan.frontendTaskId ? [storyPlan.frontendTaskId] : [],
+      `Completed ${storyPlan.storyLabel} frontend task for "${refreshedFeature.name}".`,
+    );
 
     const backendFeatureInput = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const backendResult = await this.executeAgent(jobId, "implementing_feature", this.deps.backendAgent, {
@@ -765,7 +872,11 @@ export class DeliveryOrchestrator {
       databaseStatus: "in_progress",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, backendResult.changedFiles),
     }));
-    await this.markSpeckitTasksForFeature(jobId, featureId, "backend");
+    await this.markSpeckitTaskIds(
+      jobId,
+      storyPlan.backendTaskId ? [storyPlan.backendTaskId] : [],
+      `Completed ${storyPlan.storyLabel} backend task for "${refreshedFeature.name}".`,
+    );
 
     const dbFeatureInput = this.requireFeature(await this.deps.store.get(jobId), featureId);
     const dbResult = await this.executeAgent(jobId, "implementing_feature", this.deps.dbAgent, {
@@ -779,7 +890,11 @@ export class DeliveryOrchestrator {
       status: "awaiting_test",
       generatedFiles: mergeGeneratedFiles(current.generatedFiles, dbResult.changedFiles),
     }));
-    await this.markSpeckitTasksForFeature(jobId, featureId, "database");
+    await this.markSpeckitTaskIds(
+      jobId,
+      storyPlan.databaseTaskId ? [storyPlan.databaseTaskId] : [],
+      `Completed ${storyPlan.storyLabel} database task for "${refreshedFeature.name}".`,
+    );
     const initialDatabaseRun = await this.applyDatabaseArtifacts(jobId, featureId);
     if (initialDatabaseRun?.status === "failed") {
       return this.blockJob(jobId, initialDatabaseRun.summary);
@@ -891,7 +1006,11 @@ export class DeliveryOrchestrator {
       status: "done",
     }));
     await this.markFeatureBugsFixed(jobId, featureId);
-    await this.markSpeckitTasksForFeature(jobId, featureId, "validation");
+    await this.markSpeckitTaskIds(
+      jobId,
+      storyPlan.validationTaskId ? [storyPlan.validationTaskId] : [],
+      `Completed ${storyPlan.storyLabel} validation task for "${updatedFeature.name}".`,
+    );
 
     const monitoredJob = await this.deps.store.get(jobId);
     const monitoredFeature = this.requireFeature(monitoredJob, featureId);

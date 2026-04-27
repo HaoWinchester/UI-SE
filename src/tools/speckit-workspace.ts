@@ -26,6 +26,35 @@ export interface SpeckitImplementationWorkspace {
   tasksPath: string;
 }
 
+export interface SpeckitChecklistStatus {
+  filePath: string;
+  name: string;
+  total: number;
+  completed: number;
+  incomplete: number;
+  passed: boolean;
+}
+
+export interface SpeckitStoryTaskPlan {
+  storyIndex: number;
+  storyLabel: string;
+  taskIds: string[];
+  frontendTaskId?: string;
+  backendTaskId?: string;
+  databaseTaskId?: string;
+  validationTaskId?: string;
+}
+
+export interface SpeckitTaskPlan {
+  totalTasks: number;
+  completedTasks: number;
+  stories: SpeckitStoryTaskPlan[];
+  finalTaskIds: {
+    flowValidation?: string;
+    acceptance?: string;
+  };
+}
+
 export async function persistSpeckitSpecWorkspace(
   baseDir: string,
   requirement: ProductRequirement,
@@ -295,6 +324,115 @@ export async function markSpeckitTasksComplete(tasksPath: string, taskIds: strin
   await writeFile(tasksPath, updated, "utf8");
 }
 
+export async function collectSpeckitChecklistStatus(
+  featureDir: string,
+): Promise<SpeckitChecklistStatus[]> {
+  const checklistsDir = path.join(featureDir, "checklists");
+  const entries = await readdir(checklistsDir, { withFileTypes: true }).catch(() => []);
+
+  const checklistStatuses = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const filePath = path.join(checklistsDir, entry.name);
+        const source = await readFile(filePath, "utf8");
+        const taskLines = source.split("\n").filter((line) => /^-\s\[( |x|X)\]/.test(line));
+        const completed = taskLines.filter((line) => /^-\s\[(x|X)\]/.test(line)).length;
+        const total = taskLines.length;
+        const incomplete = Math.max(total - completed, 0);
+
+        return {
+          filePath,
+          name: entry.name,
+          total,
+          completed,
+          incomplete,
+          passed: incomplete === 0,
+        } satisfies SpeckitChecklistStatus;
+      }),
+  );
+
+  return checklistStatuses.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export async function parseSpeckitTaskPlan(tasksPath: string): Promise<SpeckitTaskPlan> {
+  const source = await readFile(tasksPath, "utf8");
+  const lines = source.split("\n");
+  const storyPlans = new Map<number, SpeckitStoryTaskPlan>();
+  const finalTaskIds: SpeckitTaskPlan["finalTaskIds"] = {};
+  let totalTasks = 0;
+  let completedTasks = 0;
+
+  for (const line of lines) {
+    const match = line.match(/^-\s\[( |x|X)\]\s(T\d{3})(?:\s\[P\])?(?:\s\[US(\d+)\])?\s(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const [, checkboxState, taskId, storyIndexText, description] = match;
+    totalTasks += 1;
+    if (checkboxState.toLowerCase() === "x") {
+      completedTasks += 1;
+    }
+
+    if (storyIndexText) {
+      const storyIndex = Number(storyIndexText);
+      const current =
+        storyPlans.get(storyIndex) ??
+        {
+          storyIndex,
+          storyLabel: `US${storyIndex}`,
+          taskIds: [],
+        };
+
+      current.taskIds.push(taskId);
+
+      const normalizedDescription = description.toLowerCase();
+      if (normalizedDescription.includes("frontend")) {
+        current.frontendTaskId ??= taskId;
+      } else if (normalizedDescription.includes("backend")) {
+        current.backendTaskId ??= taskId;
+      } else if (
+        normalizedDescription.includes("prisma") ||
+        normalizedDescription.includes("data layer") ||
+        normalizedDescription.includes("repository")
+      ) {
+        current.databaseTaskId ??= taskId;
+      } else if (
+        normalizedDescription.includes("validate") ||
+        normalizedDescription.includes("repair") ||
+        normalizedDescription.includes("align")
+      ) {
+        current.validationTaskId ??= taskId;
+      }
+
+      storyPlans.set(storyIndex, current);
+      continue;
+    }
+
+    const normalizedDescription = description.toLowerCase();
+    if (
+      normalizedDescription.includes("flow-level validation") ||
+      normalizedDescription.includes("end-to-end checks") ||
+      normalizedDescription.includes("runtime verification")
+    ) {
+      finalTaskIds.flowValidation ??= taskId;
+    } else if (
+      normalizedDescription.includes("customer preview") ||
+      normalizedDescription.includes("release readiness")
+    ) {
+      finalTaskIds.acceptance ??= taskId;
+    }
+  }
+
+  return {
+    totalTasks,
+    completedTasks,
+    stories: [...storyPlans.values()].sort((left, right) => left.storyIndex - right.storyIndex),
+    finalTaskIds,
+  };
+}
+
 export function getSpeckitFeatureTaskIds(featureIndex: number): {
   frontend: string;
   backend: string;
@@ -522,10 +660,14 @@ function buildTasksMarkdown(requirement: ProductRequirement, codeWorkspace: Code
     "",
     "## Phase 1: Setup",
     "",
+    "**Goal**: 确保本次实现严格建立在 Speckit 澄清完成的需求和已批准的 real Stitch 设计稿之上。",
+    "",
     "- [ ] T001 Confirm constitution, clarified spec, and approved Stitch UI are all ready",
     `- [ ] T002 Prepare generated workspace under ${codeWorkspace.rootDir}`,
     "",
     "## Phase 2: Foundational",
+    "",
+    "**Goal**: 把共享契约、数据模型假设和运行时边界固定下来，避免后续切片开发跑偏。",
     "",
     "- [ ] T003 [P] Align shared runtime API contract in contracts/openapi.yaml",
     "- [ ] T004 [P] Finalize shared entity and validation assumptions in data-model.md",
@@ -535,11 +677,24 @@ function buildTasksMarkdown(requirement: ProductRequirement, codeWorkspace: Code
   let nextTaskNumber = 5;
   requirement.features.forEach((feature, index) => {
     const paths = getFeatureCodePaths(codeWorkspace, feature);
-    lines.push(`## Phase ${index + 3}: User Story ${index + 1}`);
+    lines.push(`## Phase ${index + 3}: User Story ${index + 1} - ${feature.name}`);
     lines.push("");
-    lines.push(`- [ ] ${formatTaskId(nextTaskNumber)} [US${index + 1}] Implement frontend slice in ${paths.frontendComponentPath}`);
-    lines.push(`- [ ] ${formatTaskId(nextTaskNumber + 1)} [US${index + 1}] Implement backend route in ${paths.backendRoutePath}`);
-    lines.push(`- [ ] ${formatTaskId(nextTaskNumber + 2)} [US${index + 1}] Implement Prisma/data layer in ${paths.databaseRepositoryPath}`);
+    lines.push(`**Goal**: ${feature.description}`);
+    lines.push("");
+    lines.push("**Independent Test**:");
+    lines.push(
+      `- 该切片完成后，应能通过单切片测试，且满足：${feature.acceptanceCriteria.join("；")}`,
+    );
+    lines.push("");
+    lines.push(
+      `- [ ] ${formatTaskId(nextTaskNumber)} [P] [US${index + 1}] Implement frontend slice in ${paths.frontendComponentPath}`,
+    );
+    lines.push(
+      `- [ ] ${formatTaskId(nextTaskNumber + 1)} [P] [US${index + 1}] Implement backend route in ${paths.backendRoutePath}`,
+    );
+    lines.push(
+      `- [ ] ${formatTaskId(nextTaskNumber + 2)} [P] [US${index + 1}] Implement Prisma/data layer in ${paths.databaseRepositoryPath}`,
+    );
     lines.push(`- [ ] ${formatTaskId(nextTaskNumber + 3)} [US${index + 1}] Validate, repair, and align the "${feature.name}" slice`);
     lines.push("");
     nextTaskNumber += 4;
@@ -547,8 +702,31 @@ function buildTasksMarkdown(requirement: ProductRequirement, codeWorkspace: Code
 
   lines.push("## Final Phase: Polish");
   lines.push("");
+  lines.push("**Goal**: 完成跨切片联调、验收验证与交付前检查。");
+  lines.push("");
   lines.push(`- [ ] ${formatTaskId(nextTaskNumber)} Run flow-level validation, end-to-end checks, and generated project runtime verification`);
   lines.push(`- [ ] ${formatTaskId(nextTaskNumber + 1)} Prepare final customer preview and release readiness validation`);
+  lines.push("");
+  lines.push("## Dependencies");
+  lines.push("");
+  lines.push("- Setup 与 Foundational 阶段必须先完成。");
+  requirement.features.forEach((feature, index) => {
+    lines.push(`- US${index + 1} 负责交付「${feature.name}」，完成后才能进入对应的验证与修复闭环。`);
+  });
+  lines.push("- Final Phase 依赖所有用户故事切片完成并通过单切片验证。");
+  lines.push("");
+  lines.push("## Parallel Execution Examples");
+  lines.push("");
+  requirement.features.forEach((feature, index) => {
+    const paths = getFeatureCodePaths(codeWorkspace, feature);
+    lines.push(`- US${index + 1}: 可并行推进 ${paths.frontendComponentPath}、${paths.backendRoutePath}、${paths.databaseRepositoryPath}，随后再统一进入验证任务。`);
+  });
+  lines.push("");
+  lines.push("## Implementation Strategy");
+  lines.push("");
+  lines.push("- 先锁定澄清需求与 real Stitch 设计稿，再生成 plan / contracts / tasks。");
+  lines.push("- 每个用户故事切片都必须经历：前端实现 -> 后端实现 -> 数据层实现 -> 测试/修复/对齐。");
+  lines.push("- 所有切片完成后，再进行全站流转测试、客户预览和发布前阻断检查。");
   lines.push("");
 
   return lines.join("\n");

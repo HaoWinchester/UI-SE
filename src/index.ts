@@ -11,6 +11,7 @@ import type {
   SpecClarificationQuestion,
 } from "./agents/spec-agent.js";
 import { hasRealStitchCredentials, readStitchRuntimeEnv } from "./config/env.js";
+import { parseSpeckitTaskPlan } from "./tools/speckit-workspace.js";
 import type { UiArtifact } from "./types/domain.js";
 import type {
   OrchestratorRuntimeHooks,
@@ -80,12 +81,23 @@ async function main(): Promise<void> {
 
     const job = await orchestrator.createJob(requirementInput.rawRequirement);
     const result = await orchestrator.run(job.id);
+    const speckitTaskPlan = result.specArtifact?.speckitTasksPath
+      ? await parseSpeckitTaskPlan(result.specArtifact.speckitTasksPath).catch(() => undefined)
+      : undefined;
 
     console.log(`Requirement source: ${requirementInput.sourceLabel}`);
     console.log(`Job: ${result.id}`);
     console.log(`Stage: ${result.stage}`);
     console.log(`Spec: ${result.specArtifact?.markdownPath ?? "none"}`);
     console.log(`Speckit spec: ${result.specArtifact?.speckitSpecPath ?? "none"}`);
+    console.log(`Speckit checklist: ${result.specArtifact?.speckitChecklistPath ?? "none"}`);
+    console.log(`Speckit plan: ${result.specArtifact?.speckitPlanPath ?? "none"}`);
+    console.log(`Speckit tasks: ${result.specArtifact?.speckitTasksPath ?? "none"}`);
+    console.log(
+      `Speckit task progress: ${
+        speckitTaskPlan ? `${speckitTaskPlan.completedTasks}/${speckitTaskPlan.totalTasks}` : "none"
+      }`,
+    );
     console.log(`Clarifications: ${result.requirement.clarifications.length}`);
     console.log(`Features: ${result.requirement.features.length}`);
     console.log(`UI versions: ${result.uiArtifacts.length}`);
