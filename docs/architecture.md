@@ -1,126 +1,126 @@
-# Architecture
+# 架构说明
 
-## Goal
+## 目标
 
-Build a delivery system that can move an approved requirement through the following lifecycle:
+构建一个交付系统，让一份已批准的需求能够沿着下面这条生命周期稳定流转：
 
-1. draft and confirm a spec
-2. generate a UI draft through Stitch
-3. implement one feature at a time
-4. test after each feature
-5. loop through fixes when tests fail
-6. verify the implementation still matches the requirement
-7. run acceptance tests and deploy
+1. 起草并确认 spec
+2. 通过 Stitch 生成 UI 初稿
+3. 按功能点逐个实现
+4. 每完成一个功能点就执行测试
+5. 测试失败时进入修复循环
+6. 验证当前实现是否仍与需求一致
+7. 执行验收测试并发布
 
-## Layers
+## 分层
 
-### 1. Workflow layer
+### 1. 工作流层
 
-The workflow layer owns:
+工作流层负责：
 
-- stage transitions
-- retry rules
-- failure handling
-- progress events
-- artifact handoff between steps
+- 阶段流转
+- 重试规则
+- 失败处理
+- 进度事件
+- 各步骤之间的产物交接
 
-This is implemented in code, not in `SKILL.md`.
+这一层应当通过代码实现，而不是写在 `SKILL.md` 里。
 
-### 2. Agent layer
+### 2. Agent 层
 
-Each agent owns a single decision-focused responsibility:
+每个 agent 只负责一个以“判断”为核心的职责：
 
-- `spec-agent`: turn raw input into an executable spec
-- `ui-agent`: prepare the Stitch submission prompt
-- `dev-agent`: define the implementation task for the current feature
-- `test-agent`: interpret test results and decide the next step
-- `fix-agent`: turn bugs into a repair plan
-- `monitor-agent`: check that the build still matches the approved requirement
-- `deploy-agent`: approve and prepare deployment
+- `spec-agent`：把原始输入整理成可执行的 spec
+- `ui-agent`：准备提交给 Stitch 的 prompt
+- `dev-agent`：为当前功能点定义实现任务
+- `test-agent`：解释测试结果并决定下一步动作
+- `fix-agent`：把 bug 收敛成修复计划
+- `monitor-agent`：检查当前构建是否仍符合已批准需求
+- `deploy-agent`：批准并准备部署
 
-Each agent is configured with:
+每个 agent 都会配置：
 
-- a model profile
-- a prompt contract
-- explicit read scopes
-- explicit write scopes
-- an allowed tool list
+- 模型画像
+- prompt 契约
+- 明确的读权限范围
+- 明确的写权限范围
+- 允许使用的工具列表
 
-The current scaffold stores those constraints in code so the orchestrator can enforce them consistently when you later plug in a real model runtime.
+当前这套骨架把这些约束都放在代码里，这样后面接入真实模型运行时，orchestrator 依然可以稳定执行同一套规则。
 
-### 3. Tool layer
+### 3. 工具层
 
-The tool layer owns deterministic actions:
+工具层负责确定性的动作：
 
-- Stitch SDK calls and, when necessary, website automation
-- file upload and download
-- test execution
-- deployment
-- storage
+- Stitch SDK 调用，以及在必要时补充网站自动化
+- 文件上传与下载
+- 测试执行
+- 部署
+- 存储
 
-The Stitch tool path now also owns explicit proxy handling because the runtime environment may need a manually configured Node fetch dispatcher even when the desktop has a working system proxy.
+当前 Stitch 工具链还额外负责显式代理处理，因为运行环境即使桌面系统代理可用，Node 的 `fetch` 运行时也可能仍然需要手动配置 dispatcher。
 
-## Why skills exist in this design
+## 为什么这里还要有 skill
 
-Skills are not the workflow itself. They are reusable operating guides for each agent role.
+skill 不是工作流本身，而是每个 agent 角色可复用的操作指南。
 
-Use `SKILL.md` to define:
+应当用 `SKILL.md` 来定义：
 
-- when the agent should be used
-- what inputs it needs
-- what outputs it must return
-- which tools it should prefer
-- what constraints it must respect
+- 什么时候应该使用这个 agent
+- 它需要哪些输入
+- 它必须返回哪些输出
+- 它应该优先使用哪些工具
+- 它必须遵守哪些约束
 
-The skill explains how the role should think. The orchestrator and tool layer enforce what the role can actually touch at runtime.
+skill 决定“这个角色应该怎么思考”；而 orchestrator 和工具层决定“这个角色在运行时真正能接触什么”。
 
-## Runtime shape
+## 运行形态
 
 ```mermaid
 flowchart TD
-  A["Requirement Input"] --> B["Spec Agent"]
-  B --> C["Workflow Engine"]
+  A["需求输入"] --> B["Spec Agent"]
+  B --> C["工作流引擎"]
   C --> D["UI Agent"]
-  D --> E["Stitch Client"]
-  E --> F["Downloaded UI Artifact"]
-  F --> G["Dev Agent"]
-  G --> H["Test Runner"]
-  H --> I{"Passed?"}
-  I -- "No" --> J["Fix Agent"]
+  D --> E["Stitch 客户端"]
+  E --> F["下载后的 UI 产物"]
+  F --> G["开发 Agent"]
+  G --> H["测试执行器"]
+  H --> I{"是否通过？"}
+  I -- "否" --> J["修复 Agent"]
   J --> H
-  I -- "Yes" --> K["Monitor Agent"]
-  K --> L["Acceptance Tests"]
-  L --> M{"Approved?"}
-  M -- "No" --> J
-  M -- "Yes" --> N["Deploy Agent"]
-  N --> O["Deployment"]
+  I -- "是" --> K["监控 Agent"]
+  K --> L["验收测试"]
+  L --> M{"是否批准？"}
+  M -- "否" --> J
+  M -- "是" --> N["部署 Agent"]
+  N --> O["部署结果"]
 ```
 
-## Initial delivery plan
+## 初始交付计划
 
-### Phase 1
+### 第一阶段
 
-Make one feature flow run end to end with mocks:
+先用 mock 打通单个功能点的端到端闭环：
 
-- in-memory jobs
-- mock Stitch integration
-- mock tests
-- mock deploy
+- 内存态 jobs
+- mock Stitch 集成
+- mock 测试
+- mock 部署
 
-### Phase 2
+### 第二阶段
 
-Replace mocks with real deterministic integrations:
+把 mock 逐步替换成真实、确定性的集成：
 
-- Stitch SDK first, Playwright only for uncovered flows
-- real repo tasks for development
-- real unit and end-to-end tests
-- staging deployment
+- 优先接 Stitch SDK，只有 SDK 覆盖不到的流程再补 Playwright
+- 用真实仓库任务承接开发
+- 执行真实单元测试和端到端测试
+- 发布到 staging 环境
 
-### Phase 3
+### 第三阶段
 
-Upgrade the decision nodes:
+继续升级那些“需要判断”的节点：
 
-- model-backed planning
-- better repair loops
-- risk scoring
-- richer alignment checks
+- 用模型驱动更强的规划能力
+- 做更完整的修复循环
+- 增加风险评分
+- 增强一致性与偏航检查
